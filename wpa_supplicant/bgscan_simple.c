@@ -16,6 +16,7 @@
 #include "driver_i.h"
 #include "scan.h"
 #include "bgscan.h"
+#include "bgscan_i.h"
 
 struct bgscan_simple_data {
 	struct wpa_supplicant *wpa_s;
@@ -27,6 +28,7 @@ struct bgscan_simple_data {
 	int short_interval; /* use if signal < threshold */
 	int long_interval; /* use if signal > threshold */
 	struct os_reltime last_bgscan;
+	struct bgscan_signal_monitor_state signal_monitor;
 };
 
 
@@ -133,18 +135,17 @@ static void * bgscan_simple_init(struct wpa_supplicant *wpa_s,
 		   data->signal_threshold, data->short_interval,
 		   data->long_interval);
 
-	if (data->signal_threshold &&
-	    wpa_drv_signal_monitor(wpa_s, data->signal_threshold, 4) < 0) {
-		wpa_printf(MSG_ERROR, "bgscan simple: Failed to enable "
-			   "signal strength monitoring");
-	}
-
 	data->scan_interval = data->short_interval;
 	data->max_short_scans = data->long_interval / data->short_interval + 1;
 	if (data->signal_threshold) {
-		/* Poll for signal info to set initial scan interval */
 		struct wpa_signal_info siginfo;
-		if (wpa_drv_signal_poll(wpa_s, &siginfo) == 0 &&
+
+		bgscan_init_signal_monitor(&data->signal_monitor, wpa_s,
+					   data->signal_threshold, 4);
+
+		/* Poll for signal info to set initial scan interval */
+		if (bgscan_poll_signal_monitor(&data->signal_monitor,
+					       &siginfo) == 0 &&
 		    siginfo.current_signal >= data->signal_threshold)
 			data->scan_interval = data->long_interval;
 	}
@@ -170,7 +171,7 @@ static void bgscan_simple_deinit(void *priv)
 	struct bgscan_simple_data *data = priv;
 	eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
 	if (data->signal_threshold)
-		wpa_drv_signal_monitor(data->wpa_s, 0, 0);
+		bgscan_deinit_signal_monitor(&data->signal_monitor);
 	os_free(data);
 }
 
@@ -182,6 +183,8 @@ static int bgscan_simple_notify_scan(void *priv,
 
 	wpa_printf(MSG_DEBUG, "bgscan simple: scan result notification");
 
+	if (data->signal_threshold)
+		bgscan_poll_signal_monitor(&data->signal_monitor, NULL);
 	eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
 	eloop_register_timeout(data->scan_interval, 0, bgscan_simple_timeout,
 			       data, NULL);
@@ -221,6 +224,10 @@ static void bgscan_simple_notify_signal_change(void *priv, int above,
 		   "(above=%d current_signal=%d current_noise=%d "
 		   "current_txrate=%d))", above, current_signal,
 		   current_noise, current_txrate);
+
+	bgscan_update_signal_monitor(&data->signal_monitor, current_signal,
+				     current_noise);
+
 	if (data->scan_interval == data->long_interval && !above) {
 		wpa_printf(MSG_DEBUG, "bgscan simple: Start using short "
 			   "bgscan interval");

@@ -9,9 +9,12 @@
 #include "includes.h"
 
 #include "common.h"
+#include "eloop.h"
 #include "wpa_supplicant_i.h"
 #include "config_ssid.h"
+#include "driver_i.h"
 #include "bgscan.h"
+#include "bgscan_i.h"
 
 #ifdef CONFIG_BGSCAN_SIMPLE
 extern const struct bgscan_ops bgscan_simple_ops;
@@ -115,3 +118,85 @@ void bgscan_notify_signal_change(struct wpa_supplicant *wpa_s, int above,
 						    current_noise,
 						    current_txrate);
 }
+
+static void bgscan_apply_signal_monitor(void *eloop_ctx, void *timeout_ctx)
+{
+	struct bgscan_signal_monitor_state *sm_state = eloop_ctx;
+
+	wpa_drv_signal_monitor(sm_state->wpa_s, sm_state->calc_threshold,
+			       sm_state->hysteresis);
+}
+
+
+void bgscan_update_signal_monitor(struct bgscan_signal_monitor_state *sm_state,
+				 int current_signal, int current_noise)
+{
+	int threshold = current_noise + sm_state->headroom;
+
+	if (current_noise >= 0)
+		return;
+
+	if (threshold >= sm_state->calc_threshold -
+	    BGSCAN_NOISEFLOOR_TOLERANCE &&
+	    threshold <= sm_state->calc_threshold +
+	    BGSCAN_NOISEFLOOR_TOLERANCE)
+		return;
+
+	wpa_printf(MSG_DEBUG, "%s: noisefloor update: %d -> %d",
+		   __func__, sm_state->calc_threshold - sm_state->headroom,
+		   current_noise);
+
+	sm_state->calc_threshold = threshold;
+
+	/*
+	 * Schedule a noisefloor adjustment.  Do this as a timeout callback,
+	 * so it is implicitly throttled.
+	 */
+	eloop_cancel_timeout(bgscan_apply_signal_monitor, sm_state, NULL);
+	eloop_register_timeout(BGSCAN_NOISEFLOOR_UPDATE_DELAY, 0,
+			       bgscan_apply_signal_monitor, sm_state, NULL);
+}
+
+int bgscan_poll_signal_monitor(struct bgscan_signal_monitor_state *sm_state,
+			       struct wpa_signal_info *siginfo_ret)
+{
+	struct wpa_signal_info siginfo;
+	int ret;
+
+	ret = wpa_drv_signal_poll(sm_state->wpa_s, &siginfo);
+	if (ret != 0)
+		return ret;
+
+	wpa_printf(MSG_DEBUG, "%s: bgscan poll noisefloor: %d ",
+		   __func__, siginfo.current_noise);
+
+	bgscan_update_signal_monitor(sm_state, siginfo.current_signal,
+				     siginfo.current_noise);
+
+	if (siginfo_ret != 0)
+		memcpy(siginfo_ret, &siginfo, sizeof(siginfo));
+
+	return 0;
+}
+
+void bgscan_init_signal_monitor(struct bgscan_signal_monitor_state *sm_state,
+				struct wpa_supplicant *wpa_s,
+				int signal_threshold,
+				int hysteresis) {
+
+	sm_state->wpa_s = wpa_s;
+	sm_state->calc_threshold = signal_threshold;
+	sm_state->hysteresis = hysteresis;
+	sm_state->headroom = signal_threshold - BGSCAN_DEFAULT_NOISE_FLOOR;
+
+	if (wpa_drv_signal_monitor(wpa_s, signal_threshold, hysteresis) < 0)
+		wpa_printf(MSG_ERROR, "bgscan simple: Failed to enable "
+			   "signal strength monitoring");
+}
+
+void bgscan_deinit_signal_monitor(struct bgscan_signal_monitor_state *sm_state)
+{
+	wpa_drv_signal_monitor(sm_state->wpa_s, 0, 0);
+	eloop_cancel_timeout(bgscan_apply_signal_monitor, sm_state, NULL);
+}
+
