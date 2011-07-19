@@ -2092,6 +2092,8 @@ wpa_supplicant_get_scan_results(struct wpa_supplicant *wpa_s,
 	      compar);
 	dump_scan_res(scan_res);
 
+	scan_res->aborted = (info && info->aborted);
+
 	wpa_bss_update_start(wpa_s);
 	for (i = 0; i < scan_res->num; i++)
 		wpa_bss_update_scan_res(wpa_s, scan_res->res[i],

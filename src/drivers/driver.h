@@ -257,11 +257,13 @@ struct wpa_scan_res {
  * @res: Array of pointers to allocated variable length scan result entries
  * @num: Number of entries in the scan result array
  * @fetch_time: Time when the results were fetched from the driver
+ * @aborted: Whether the scan was aborted
  */
 struct wpa_scan_results {
 	struct wpa_scan_res **res;
 	size_t num;
 	struct os_reltime fetch_time;
+	int aborted;
 };
 
 /**
