@@ -784,8 +784,9 @@ void wpa_bss_update_end(struct wpa_supplicant *wpa_s, struct scan_info *info,
 	struct wpa_bss *bss, *n;
 
 	os_get_reltime(&wpa_s->last_scan);
-	if (!new_scan)
-		return; /* do not expire entries without new scan */
+	/* only expire entries with a new complete scan */
+	if (!new_scan || (info != NULL && info->aborted))
+		return;
 
 	dl_list_for_each_safe(bss, n, &wpa_s->bss, struct wpa_bss, list) {
 		if (wpa_bss_in_use(wpa_s, bss))
