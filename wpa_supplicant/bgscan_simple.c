@@ -28,8 +28,54 @@ struct bgscan_simple_data {
 	int short_interval; /* use if signal < threshold */
 	int long_interval; /* use if signal > threshold */
 	struct os_reltime last_bgscan;
+	int *supp_freqs;
+	int n_supp_freqs;
+	int freq_idx;
 	struct bgscan_signal_monitor_state signal_monitor;
 };
+
+
+static int * bgscan_simple_get_freqs(struct bgscan_simple_data *data)
+{
+	int *freqs;
+	int i, j;
+
+	if (data->supp_freqs == NULL)
+		return NULL;
+
+	/* NB: n_supp_freqs has +1 for trailing zero */
+	freqs = os_malloc(data->n_supp_freqs * sizeof(int));
+	if (freqs == NULL)
+		return NULL;
+
+	j = 0;
+	for (i = data->freq_idx; i < data->n_supp_freqs; i++)
+		freqs[j++] = data->supp_freqs[i];
+	for (i = 0; i < data->freq_idx; i++)
+		freqs[j++] = data->supp_freqs[i];
+
+	return freqs;
+}
+
+
+static void log_freqs(const char *tag, const int freqs[])
+{
+	char msg[1000], *pos;
+	int i;
+
+	msg[0] = '\0';
+	pos = msg;
+	for (i = 0; freqs[i] != 0; i++) {
+		int ret;
+		ret = os_snprintf(pos, msg + sizeof(msg) - pos, " %d",
+				  freqs[i]);
+		if (ret < 0 || ret >= msg + sizeof(msg) - pos)
+			break;
+		pos += ret;
+	}
+	pos[0] = '\0';
+	wpa_printf(MSG_DEBUG, "bgscan simple: %s frequencies:%s", tag, msg);
+}
 
 
 static void bgscan_simple_timeout(void *eloop_ctx, void *timeout_ctx)
@@ -42,15 +88,21 @@ static void bgscan_simple_timeout(void *eloop_ctx, void *timeout_ctx)
 	params.num_ssids = 1;
 	params.ssids[0].ssid = data->ssid->ssid;
 	params.ssids[0].ssid_len = data->ssid->ssid_len;
-	params.freqs = data->ssid->scan_freq;
+
+	if (data->ssid->scan_freq == NULL)
+		params.freqs = bgscan_simple_get_freqs(data);
+	else
+		params.freqs = data->ssid->scan_freq;
 
 	/*
-	 * A more advanced bgscan module would learn about most like channels
-	 * over time and request scans only for some channels (probing others
-	 * every now and then) to reduce effect on the data connection.
+	 * TODO(sleffler) maybe don't abort if signal low and we
+	 * don't have recent results
 	 */
+	params.low_priority = 1;
 
 	wpa_printf(MSG_DEBUG, "bgscan simple: Request a background scan");
+	if (params.freqs != NULL)
+		log_freqs("Scanning", params.freqs);
 	if (wpa_supplicant_trigger_scan(wpa_s, &params)) {
 		wpa_printf(MSG_DEBUG, "bgscan simple: Failed to trigger scan");
 		eloop_register_timeout(data->scan_interval, 0,
@@ -110,6 +162,68 @@ static int bgscan_simple_get_params(struct bgscan_simple_data *data,
 }
 
 
+static int in_array(const int *array, int v)
+{
+	int i;
+
+	if (array == NULL)
+		return 0;
+
+	for (i = 0; array[i] != 0; i++)
+		if (array[i] == v)
+			return 1;
+	return 0;
+}
+
+static void bgscan_simple_setup_freqs(struct wpa_supplicant *wpa_s,
+				      struct bgscan_simple_data *data)
+{
+	struct hostapd_hw_modes *modes;
+	const struct hostapd_hw_modes *infra;
+	u16 num_modes, flags;
+	int i, j, *freqs;
+	size_t count;
+
+	data->supp_freqs = NULL;
+	data->freq_idx = 0;
+
+	modes = wpa_drv_get_hw_feature_data(wpa_s, &num_modes, &flags);
+	if (!modes)
+		return;
+
+	count = 0;
+	freqs = NULL;
+	for (i = 0; i < num_modes; i++) {
+		for (j = 0; j < modes[i].num_channels; j++) {
+			int freq, *n;
+
+			if (modes[i].channels[j].flag & HOSTAPD_CHAN_DISABLED)
+				continue;
+			freq = modes[i].channels[j].freq;
+			if (in_array(freqs, freq))	/* NB: de-dup list */
+				continue;
+			n = os_realloc(freqs, (count + 2) * sizeof(int));
+			if (n != NULL) {
+				freqs = n;
+				freqs[count++] = freq;
+				freqs[count] = 0;
+			}
+		}
+		os_free(modes[i].channels);
+		os_free(modes[i].rates);
+	}
+	os_free(modes);
+
+	if (freqs != NULL) {
+		/* TODO(sleffler) priority order freqs */
+		data->supp_freqs = freqs;
+		data->n_supp_freqs = count+1;	/* NB: +1 for terminating 0 */
+
+		log_freqs("Supported", freqs);
+	}
+}
+
+
 static void * bgscan_simple_init(struct wpa_supplicant *wpa_s,
 				 const char *params,
 				 const struct wpa_ssid *ssid)
@@ -151,6 +265,9 @@ static void * bgscan_simple_init(struct wpa_supplicant *wpa_s,
 	}
 	wpa_printf(MSG_DEBUG, "bgscan simple: Init scan interval: %d",
 		   data->scan_interval);
+
+	bgscan_simple_setup_freqs(wpa_s, data);
+
 	eloop_register_timeout(data->scan_interval, 0, bgscan_simple_timeout,
 			       data, NULL);
 
@@ -172,9 +289,23 @@ static void bgscan_simple_deinit(void *priv)
 	eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
 	if (data->signal_threshold)
 		bgscan_deinit_signal_monitor(&data->signal_monitor);
+	os_free(data->supp_freqs);
 	os_free(data);
 }
 
+
+static int find_freq_index(const struct bgscan_simple_data *data, int freq)
+{
+	int ix;
+
+	for (ix = data->freq_idx; ix < data->n_supp_freqs; ix++)
+		if (freq == data->supp_freqs[ix])
+			return ix;
+	for (ix = 0; ix < data->freq_idx; ix++)
+		if (freq == data->supp_freqs[ix])
+			return ix;
+	return -1;
+}
 
 static int bgscan_simple_notify_scan(void *priv,
 				     struct wpa_scan_results *scan_res)
@@ -182,6 +313,31 @@ static int bgscan_simple_notify_scan(void *priv,
 	struct bgscan_simple_data *data = priv;
 
 	wpa_printf(MSG_DEBUG, "bgscan simple: scan result notification");
+
+	if (scan_res->aborted && data->supp_freqs != NULL) {
+		int last_freq, i, idx;
+		/*
+		 * Scan was aborted; advance the rotor past known
+		 * channels visited.  This does not take into account
+		 * channels that were visited but had no scan results.
+		 * This should be ok as we always supply a complete
+		 * frequency list when we scan.
+		 *
+		 * NB: can't depend on scan results order matching our
+		 * channel list as the upper layers sort results
+		 */
+		last_freq = 0;
+		for (i = 0; i < scan_res->num; i++) {
+			if (scan_res->res[i]->freq == last_freq)
+				continue;
+			last_freq = scan_res->res[i]->freq;
+			idx = find_freq_index(data, last_freq) + 1;
+			if (idx != -1)
+				data->freq_idx = (idx + 1) % data->n_supp_freqs;
+		}
+	} else
+		data->freq_idx = 0;
+	wpa_printf(MSG_DEBUG, "bgscan simple: freq_idx %d", data->freq_idx);
 
 	if (data->signal_threshold)
 		bgscan_poll_signal_monitor(&data->signal_monitor, NULL);
