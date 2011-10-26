@@ -3530,6 +3530,8 @@ struct wpa_config * wpa_config_alloc_empty(const char *ctrl_interface,
 	config->bss_expiration_age = DEFAULT_BSS_EXPIRATION_AGE;
 	config->bss_expiration_scan_count = DEFAULT_BSS_EXPIRATION_SCAN_COUNT;
 	config->max_num_sta = DEFAULT_MAX_NUM_STA;
+	config->roam_threshold = DEFAULT_ROAM_THRESHOLD;
+	config->roam_min = DEFAULT_ROAM_MIN;
 	config->access_network_type = DEFAULT_ACCESS_NETWORK_TYPE;
 	config->scan_cur_freq = DEFAULT_SCAN_CUR_FREQ;
 	config->wmm_ac_params[0] = ac_be;
@@ -4207,6 +4209,8 @@ static const struct global_parse_data global_fields[] = {
 #ifdef CONFIG_HS20
 	{ INT_RANGE(hs20, 0, 1), 0 },
 #endif /* CONFIG_HS20 */
+	{ INT(roam_threshold), 0 },
+	{ INT(roam_min), 0 },
 	{ INT_RANGE(interworking, 0, 1), 0 },
 	{ FUNC(hessid), 0 },
 	{ INT_RANGE(access_network_type, 0, 15), 0 },

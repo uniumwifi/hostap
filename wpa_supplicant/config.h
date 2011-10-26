@@ -40,6 +40,21 @@
 #define DEFAULT_CERT_IN_CB 1
 #define DEFAULT_P2P_GO_CTWINDOW 0
 
+/*
+ * Roaming thresholds: we consider roaming only if the SNR of the
+ * current AP is below ROAM_THRESHOLD.  When that happens
+ * we will jump to a new AP if that station's signal is ROAM_MIN
+ * dBm higher than ours.  The weak threshold is picked according to
+ * minimum signal required to support 24M tx rate in legacy operation.
+ * The difference is chosen such that the new AP will have at least
+ * 2x the signal of our current AP; this should be sufficient to jump
+ * our tx rate up by at least one level.
+ *
+ * TODO(sleffler) these values need to be per-band/modulation
+ */
+#define DEFAULT_ROAM_THRESHOLD 18
+#define DEFAULT_ROAM_MIN 3
+
 #include "config_ssid.h"
 #include "wps/wps.h"
 #include "common/ieee802_11_defs.h"
@@ -849,6 +864,16 @@ struct wpa_config {
 	 * disassoc_low_ack - Disassocicate stations with massive packet loss
 	 */
 	int disassoc_low_ack;
+
+	/**
+	 * roam_threshold - SNR threshold for considering roaming
+	 */
+	unsigned int roam_threshold;
+
+	/**
+	 * roam_min - min SNR difference between AP's required to roam
+	 */
+	unsigned int roam_min;
 
 	/**
 	 * interworking - Whether Interworking (IEEE 802.11u) is enabled

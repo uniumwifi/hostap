@@ -1294,14 +1294,28 @@ static void wpa_supplicant_rsn_preauth_scan_results(
 }
 
 
+int wpa_supplicant_need_scan_results(struct wpa_supplicant *wpa_s)
+{
+	struct wpa_bss *current_bss = wpa_s->current_bss;
+
+	if (current_bss == NULL)
+		return TRUE;
+	if (current_bss->noise) {
+		int current_snr = current_bss->level - current_bss->noise;
+		/* NB: be more aggressive requesting a non-preempted scan */
+		return current_snr <
+		    (wpa_s->conf->roam_threshold + wpa_s->conf->roam_min);
+	} else {
+		return current_bss->level < -70;
+	}
+}
+
+
 static int wpa_supplicant_need_to_roam(struct wpa_supplicant *wpa_s,
 				       struct wpa_bss *selected,
 				       struct wpa_ssid *ssid)
 {
 	struct wpa_bss *current_bss = NULL;
-#ifndef CONFIG_NO_ROAMING
-	int min_diff;
-#endif /* CONFIG_NO_ROAMING */
 
 	if (wpa_s->reassociate)
 		return 1; /* explicit request to reassociate */
@@ -1332,16 +1346,6 @@ static int wpa_supplicant_need_to_roam(struct wpa_supplicant *wpa_s,
 		return 1; /* current BSS not seen in the last scan */
 
 #ifndef CONFIG_NO_ROAMING
-	wpa_dbg(wpa_s, MSG_DEBUG, "Considering within-ESS reassociation");
-	wpa_dbg(wpa_s, MSG_DEBUG, "Current BSS: " MACSTR
-		" level=%d snr=%d est_throughput=%u",
-		MAC2STR(current_bss->bssid), current_bss->level,
-		current_bss->snr, current_bss->est_throughput);
-	wpa_dbg(wpa_s, MSG_DEBUG, "Selected BSS: " MACSTR
-		" level=%d snr=%d est_throughput=%u",
-		MAC2STR(selected->bssid), selected->level,
-		selected->snr, selected->est_throughput);
-
 	if (wpa_s->current_ssid->bssid_set &&
 	    os_memcmp(selected->bssid, wpa_s->current_ssid->bssid, ETH_ALEN) ==
 	    0) {
@@ -1362,23 +1366,75 @@ static int wpa_supplicant_need_to_roam(struct wpa_supplicant *wpa_s,
 		return 0;
 	}
 
-	min_diff = 2;
-	if (current_bss->level < 0) {
-		if (current_bss->level < -85)
-			min_diff = 1;
-		else if (current_bss->level < -80)
-			min_diff = 2;
-		else if (current_bss->level < -75)
-			min_diff = 3;
-		else if (current_bss->level < -70)
-			min_diff = 4;
-		else
-			min_diff = 5;
-	}
-	if (abs(current_bss->level - selected->level) < min_diff) {
-		wpa_dbg(wpa_s, MSG_DEBUG, "Skip roam - too small difference "
-			"in signal level");
-		return 0;
+	if (current_bss->noise && selected->noise) {
+		int current_snr, selected_snr;
+		/*
+		 * We have the noise floor for both stations; use SNR
+		 * instead of signal level to decide whether to roam.
+		 */
+		current_snr = MIN(current_bss->level - current_bss->noise,
+		    GREAT_SNR);
+		/* TOD0(sleffler) depends on band? */
+		if (current_snr >= wpa_s->conf->roam_threshold) {
+			/*
+			 * Never roam unless signal is "weak".
+			 */
+			wpa_dbg(wpa_s, MSG_DEBUG, "Skip roam - current snr %d "
+				"exceeds weak threshold", current_snr);
+			return 0;
+		}
+		selected_snr = MIN(selected->level - selected->noise,
+		    GREAT_SNR);
+
+		wpa_dbg(wpa_s, MSG_DEBUG, "Considering within-ESS reassociation");
+		wpa_dbg(wpa_s, MSG_DEBUG, "Current BSS: " MACSTR " snr=%d",
+			MAC2STR(current_bss->bssid), current_snr);
+		wpa_dbg(wpa_s, MSG_DEBUG, "Selected BSS: " MACSTR " snr=%d",
+			MAC2STR(selected->bssid), selected_snr);
+
+		/*
+		 * Never roam for less than ROAM_SNR_MIN_DIFF improvement
+		 * (should be at least 3dBm); that represents at least 2x
+		 * signal strength.  Note that we know the SNR for the
+		 * current AP is <= ROAM_SNR_WEAK_THRESHOLD so ROAM_SNR_MIN_DIFF
+		 * should represent a significant improvement.
+		 *
+		 * NB: wpa_scan_result_compar usually sorts scan results by
+		 *     SNR but under some rare occurences this may not be
+		 *     true and this is handled here
+		 */
+		if ((selected_snr - current_snr) < wpa_s->conf->roam_min) {
+			wpa_dbg(wpa_s, MSG_DEBUG, "Skip roam - selected snr "
+				"not enough better than current");
+			return 0;
+		}
+	} else {
+		int min_diff;
+
+		wpa_dbg(wpa_s, MSG_DEBUG, "Considering within-ESS reassociation");
+		wpa_dbg(wpa_s, MSG_DEBUG, "Current BSS: " MACSTR " level=%d",
+			MAC2STR(current_bss->bssid), current_bss->level);
+		wpa_dbg(wpa_s, MSG_DEBUG, "Selected BSS: " MACSTR " level=%d",
+			MAC2STR(selected->bssid), selected->level);
+
+		min_diff = 2;
+		if (current_bss->level < 0) {
+			if (current_bss->level < -85)
+				min_diff = 1;
+			else if (current_bss->level < -80)
+				min_diff = 2;
+			else if (current_bss->level < -75)
+				min_diff = 3;
+			else if (current_bss->level < -70)
+				min_diff = 4;
+			else
+				min_diff = 5;
+		}
+		if (abs(current_bss->level - selected->level) < min_diff) {
+			wpa_dbg(wpa_s, MSG_DEBUG, "Skip roam - too small "
+				"difference in signal level");
+			return 0;
+		}
 	}
 
 	return 1;

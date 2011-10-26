@@ -1641,23 +1641,12 @@ struct wpabuf * wpa_scan_get_vendor_ie_multi(const struct wpa_scan_res *res,
 }
 
 
-/*
- * Channels with a great SNR can operate at full rate. What is a great SNR?
- * This doc https://supportforums.cisco.com/docs/DOC-12954 says, "the general
- * rule of thumb is that any SNR above 20 is good." This one
- * http://www.cisco.com/en/US/tech/tk722/tk809/technologies_q_and_a_item09186a00805e9a96.shtml#qa23
- * recommends 25 as a minimum SNR for 54 Mbps data rate. 30 is chosen here as a
- * conservative value.
- */
-#define GREAT_SNR 30
-
 #define IS_5GHZ(n) (n > 4000)
 
 /* Compare function for sorting scan results. Return >0 if @b is considered
  * better. */
 static int wpa_scan_result_compar(const void *a, const void *b)
 {
-#define MIN(a,b) a < b ? a : b
 	struct wpa_scan_res **_wa = (void *) a;
 	struct wpa_scan_res **_wb = (void *) b;
 	struct wpa_scan_res *wa = *_wa;
@@ -1711,7 +1700,6 @@ static int wpa_scan_result_compar(const void *a, const void *b)
 	if (snr_b_full == snr_a_full)
 		return wb->qual - wa->qual;
 	return snr_b_full - snr_a_full;
-#undef MIN
 }
 
 
