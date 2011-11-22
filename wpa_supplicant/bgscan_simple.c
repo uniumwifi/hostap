@@ -43,8 +43,7 @@ static int * bgscan_simple_get_freqs(struct bgscan_simple_data *data)
 	if (data->supp_freqs == NULL)
 		return NULL;
 
-	/* NB: n_supp_freqs has +1 for trailing zero */
-	freqs = os_malloc(data->n_supp_freqs * sizeof(int));
+	freqs = os_malloc((data->n_supp_freqs + 1) * sizeof(int));
 	if (freqs == NULL)
 		return NULL;
 
@@ -53,6 +52,7 @@ static int * bgscan_simple_get_freqs(struct bgscan_simple_data *data)
 		freqs[j++] = data->supp_freqs[i];
 	for (i = 0; i < data->freq_idx; i++)
 		freqs[j++] = data->supp_freqs[i];
+	freqs[j] = 0;		/* NB: terminator expected elsewhere */
 
 	return freqs;
 }
@@ -217,7 +217,7 @@ static void bgscan_simple_setup_freqs(struct wpa_supplicant *wpa_s,
 	if (freqs != NULL) {
 		/* TODO(sleffler) priority order freqs */
 		data->supp_freqs = freqs;
-		data->n_supp_freqs = count+1;	/* NB: +1 for terminating 0 */
+		data->n_supp_freqs = count;
 
 		log_freqs("Supported", freqs);
 	}
