@@ -3698,6 +3698,9 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 			data->signal_change.current_signal,
 			data->signal_change.current_noise,
 			data->signal_change.current_txrate);
+		if (wpa_s->current_bss)
+			wpa_bss_update_signal(wpa_s, wpa_s->current_bss,
+				data->signal_change.current_signal);
 		break;
 	case EVENT_INTERFACE_ENABLED:
 		wpa_dbg(wpa_s, MSG_DEBUG, "Interface was enabled");

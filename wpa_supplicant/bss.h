@@ -108,6 +108,8 @@ void wpa_bss_update_scan_res(struct wpa_supplicant *wpa_s,
 			     struct os_reltime *fetch_time);
 void wpa_bss_update_end(struct wpa_supplicant *wpa_s, struct scan_info *info,
 			int new_scan);
+void wpa_bss_update_signal(struct wpa_supplicant *wpa_s,
+			   struct wpa_bss *bss, int cur_signal);
 int wpa_bss_init(struct wpa_supplicant *wpa_s);
 void wpa_bss_deinit(struct wpa_supplicant *wpa_s);
 void wpa_bss_flush(struct wpa_supplicant *wpa_s);

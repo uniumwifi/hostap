@@ -601,6 +601,15 @@ wpa_bss_update(struct wpa_supplicant *wpa_s, struct wpa_bss *bss,
 	return bss;
 }
 
+void wpa_bss_update_signal(struct wpa_supplicant *wpa_s,
+			   struct wpa_bss *bss, int cur_signal)
+{
+	if (bss->level != cur_signal) {
+		bss->level = cur_signal;
+		wpas_notify_bss_signal_changed(wpa_s, bss->id);
+	}
+}
+
 
 /**
  * wpa_bss_update_start - Start a BSS table update from scan results
