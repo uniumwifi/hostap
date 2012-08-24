@@ -1145,6 +1145,8 @@ struct tls_connection * tls_connection_init(void *ssl_ctx)
 #ifdef SSL_OP_NO_COMPRESSION
 	options |= SSL_OP_NO_COMPRESSION;
 #endif /* SSL_OP_NO_COMPRESSION */
+        options |= SSL_OP_NO_TICKET;
+        options |= SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION;
 	SSL_set_options(conn->ssl, options);
 
 	conn->ssl_in = BIO_new(BIO_s_mem());
