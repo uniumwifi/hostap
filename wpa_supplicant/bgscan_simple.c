@@ -18,6 +18,8 @@
 #include "bgscan.h"
 #include "bgscan_i.h"
 
+#define SHORT_SCAN_LIMIT 5
+
 struct bgscan_simple_data {
 	struct wpa_supplicant *wpa_s;
 	const struct wpa_ssid *ssid;
@@ -111,8 +113,9 @@ static void bgscan_simple_timeout(void *eloop_ctx, void *timeout_ctx)
 		if (data->scan_interval == data->short_interval) {
 			data->short_scan_count++;
 			/*
-			 * Spend at most the duration of a long scan interval
-			 * scanning at the short scan interval. After that,
+			 * Spend at most the lesser of the duration of a
+			 * long scan interval scanning or SHORT_SCAN_LIMIT
+			 * scans at the short scan interval.  After that,
 			 * revert to the long scan interval.
 			 */
 			if (data->short_scan_count > data->max_short_scans) {
@@ -252,6 +255,8 @@ static void * bgscan_simple_init(struct wpa_supplicant *wpa_s,
 
 	data->scan_interval = data->short_interval;
 	data->max_short_scans = data->long_interval / data->short_interval + 1;
+	if (data->max_short_scans > SHORT_SCAN_LIMIT)
+		data->max_short_scans = SHORT_SCAN_LIMIT;
 	if (data->signal_threshold) {
 		struct wpa_signal_info siginfo;
 
