@@ -3177,6 +3177,31 @@ struct wpa_driver_ops {
 	 */
 	int (*set_mac_addr)(void *priv, const u8 *addr);
 
+        /**
+         * disable_high_bitrates - Request driver to disable high bitrates.
+         * @priv: private driver interface data.
+         *
+         * Returns: 0 on success, -1 on failure
+         *
+         * This should cause overly high bitrates to be disabled by the driver
+         * until enable_high_bitrates is called. This is useful for one-time
+	 * setup or WPA/DHCP negotiation where we might otherwise get
+	 * timeouts.
+         */
+        int (*disable_high_bitrates)(void *priv);
+
+        /**
+         * enable_high_bitrates - Request driver to enable high bitrates.
+         * @priv: private driver interface data.
+         *
+         * Returns: 0 on success, -1 on failure
+         *
+         * This may be overwritten by future associations to the same SSID,
+         * each of which will disable high bitrates again if
+         * disable_high_bitrates is set in the association parameters.
+         */
+        int (*enable_high_bitrates)(void *priv);
+
 #ifdef CONFIG_MACSEC
 	int (*macsec_init)(void *priv, struct macsec_init_params *params);
 

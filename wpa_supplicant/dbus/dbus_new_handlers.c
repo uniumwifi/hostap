@@ -2016,6 +2016,17 @@ DBusMessage * wpas_dbus_handler_remove_blob(DBusMessage *message,
 
 #endif /* CONFIG_NO_CONFIG_BLOBS */
 
+DBusMessage * wpas_dbus_handler_enable_high_bitrates(DBusMessage *message,
+	struct wpa_supplicant *wpa_s)
+{
+	DBusMessage *reply = NULL;
+	if (wpa_supplicant_enable_high_bitrates(wpa_s)) {
+		reply = wpas_dbus_error_unknown_error(message,
+						      "Failed to enable high "
+						      "rates.");
+	}
+	return reply;
+}
 
 /*
  * wpas_dbus_handler_flush_bss - Flush the BSS cache
@@ -3021,6 +3032,56 @@ dbus_bool_t wpas_dbus_setter_scan_interval(DBusMessageIter *iter,
 				     "scan_interval must be >= 0");
 		return FALSE;
 	}
+	return TRUE;
+}
+
+
+/**
+ * wpas_dbus_getter_disable_high_bitrates - Disable high bitrates for
+ * each association on this interface.
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Getter function for "DisableHighBitrates" property.
+ */
+dbus_bool_t wpas_dbus_getter_disable_high_bitrates(DBusMessageIter *iter,
+						   DBusError *error,
+						   void *user_data)
+{
+	struct wpa_supplicant *wpa_s = user_data;
+	dbus_bool_t disable_high_bitrates = FALSE;
+	if (wpa_s->conf->disable_high_bitrates)
+		disable_high_bitrates = TRUE;
+
+	return wpas_dbus_simple_property_getter(iter, DBUS_TYPE_BOOLEAN,
+						&disable_high_bitrates, error);
+}
+
+
+/**
+ * wpas_dbus_setter_disable_high_bitrates - Disable high bitrates for
+ * each association on this interface.
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Setter function for "DisableHighBitrates" property.
+ */
+dbus_bool_t wpas_dbus_setter_disable_high_bitrates(DBusMessageIter *iter,
+						   DBusError *error,
+						   void *user_data)
+{
+	struct wpa_supplicant *wpa_s = user_data;
+	dbus_bool_t disable_high_bitrates;
+
+	if (!wpas_dbus_simple_property_setter(iter, error, DBUS_TYPE_BOOLEAN,
+					      &disable_high_bitrates))
+		return FALSE;
+
+	wpa_s->conf->disable_high_bitrates = disable_high_bitrates;
 	return TRUE;
 }
 

@@ -188,6 +188,8 @@ static int nl80211_set_channel(struct i802_bss *bss,
 			       struct hostapd_freq_params *freq, int set_chan);
 static int nl80211_disable_11b_rates(struct wpa_driver_nl80211_data *drv,
 				     int ifindex, int disabled);
+static int nl80211_toggle_high_bitrates(struct wpa_driver_nl80211_data *drv,
+					 int ifindex, int disabled);
 
 static int nl80211_leave_ibss(struct wpa_driver_nl80211_data *drv,
 			      int reset_mode);
@@ -6350,18 +6352,25 @@ static int wpa_driver_nl80211_probe_req_report(struct i802_bss *bss, int report)
 	return -1;
 }
 
-
-static int nl80211_disable_11b_rates(struct wpa_driver_nl80211_data *drv,
-				     int ifindex, int disabled)
+/**
+ * Enable or disable rates considered for use by the driver.  Passing NULL for
+ * a set of allowed bands enables all bitrates in that band.  This function
+ * completely overwrites previous calls, rather than adding or removing rates.
+ */
+static int nl80211_set_allowed_rates(struct wpa_driver_nl80211_data *drv,
+				     int ifindex,
+				     const char *legacy_2ghz_rates,
+				     int legacy_2ghz_rates_len,
+				     const char *legacy_5ghz_rates,
+				     int legacy_5ghz_rates_len,
+				     const char *mcs_2ghz_rates,
+				     int mcs_2ghz_rates_len,
+				     const char *mcs_5ghz_rates,
+				     int mcs_5ghz_rates_len)
 {
-	struct nl_msg *msg;
+	struct nl_msg *msg = NULL;
 	struct nlattr *bands, *band;
-	int ret;
-
-	wpa_printf(MSG_DEBUG,
-		   "nl80211: NL80211_CMD_SET_TX_BITRATE_MASK (ifindex=%d %s)",
-		   ifindex, disabled ? "NL80211_TXRATE_LEGACY=OFDM-only" :
-		   "no NL80211_TXRATE_LEGACY constraint");
+	int ret = -1;
 
 	msg = nl80211_ifindex_msg(drv, ifindex, 0,
 				  NL80211_CMD_SET_TX_BITRATE_MASK);
@@ -6370,18 +6379,42 @@ static int nl80211_disable_11b_rates(struct wpa_driver_nl80211_data *drv,
 
 	bands = nla_nest_start(msg, NL80211_ATTR_TX_RATES);
 	if (!bands)
-		goto fail;
+		goto nla_put_failure;
 
-	/*
-	 * Disable 2 GHz rates 1, 2, 5.5, 11 Mbps by masking out everything
-	 * else apart from 6, 9, 12, 18, 24, 36, 48, 54 Mbps from non-MCS
-	 * rates. All 5 GHz rates are left enabled.
-	 */
 	band = nla_nest_start(msg, NL80211_BAND_2GHZ);
-	if (!band ||
-	    (disabled && nla_put(msg, NL80211_TXRATE_LEGACY, 8,
-				 "\x0c\x12\x18\x24\x30\x48\x60\x6c")))
-		goto fail;
+	if (!band)
+		goto nla_put_failure;
+	if (legacy_2ghz_rates && legacy_2ghz_rates_len >= 0) {
+		NLA_PUT(msg, NL80211_TXRATE_LEGACY,
+			legacy_2ghz_rates_len, legacy_2ghz_rates);
+	}
+	nla_nest_end(msg, band);
+
+	band = nla_nest_start(msg, NL80211_BAND_5GHZ);
+	if (!band)
+		goto nla_put_failure;
+	if (legacy_5ghz_rates && legacy_5ghz_rates_len >= 0) {
+		NLA_PUT(msg, NL80211_TXRATE_LEGACY,
+			legacy_5ghz_rates_len, legacy_5ghz_rates);
+	}
+	nla_nest_end(msg, band);
+
+	band = nla_nest_start(msg, NL80211_BAND_2GHZ);
+	if (!band)
+		goto nla_put_failure;
+	if (mcs_2ghz_rates && mcs_2ghz_rates_len >= 0) {
+		NLA_PUT(msg, NL80211_TXRATE_MCS,
+			mcs_2ghz_rates_len, mcs_2ghz_rates);
+	}
+	nla_nest_end(msg, band);
+
+	band = nla_nest_start(msg, NL80211_BAND_5GHZ);
+	if (!band)
+		goto nla_put_failure;
+	if (mcs_5ghz_rates && mcs_5ghz_rates_len >= 0) {
+		NLA_PUT(msg, NL80211_TXRATE_MCS,
+			mcs_5ghz_rates_len, mcs_5ghz_rates);
+	}
 	nla_nest_end(msg, band);
 
 	nla_nest_end(msg, bands);
@@ -6390,14 +6423,63 @@ static int nl80211_disable_11b_rates(struct wpa_driver_nl80211_data *drv,
 	if (ret) {
 		wpa_printf(MSG_DEBUG, "nl80211: Set TX rates failed: ret=%d "
 			   "(%s)", ret, strerror(-ret));
-	} else
-		drv->disabled_11b_rates = disabled;
+	}
 
 	return ret;
 
-fail:
+nla_put_failure:
 	nlmsg_free(msg);
-	return -1;
+	return ret;
+}
+
+
+static int nl80211_disable_11b_rates(struct wpa_driver_nl80211_data *drv,
+				     int ifindex, int disabled)
+{
+	wpa_printf(MSG_DEBUG,
+		   "nl80211: NL80211_CMD_SET_TX_BITRATE_MASK (ifindex=%d %s)",
+		   ifindex, disabled ? "NL80211_TXRATE_LEGACY=OFDM-only" :
+		   "no NL80211_TXRATE_LEGACY constraint");
+
+	/*
+	 * Disable 2 GHz rates 1, 2, 5.5, 11 Mbps by masking out everything
+	 * else apart from 6, 9, 12, 18, 24, 36, 48, 54 Mbps from non-MCS
+	 * rates. All 5 GHz rates are left enabled.
+	 */
+	if (disabled) {
+		int ret = nl80211_set_allowed_rates(drv, ifindex,
+				"\x0c\x12\x18\x24\x30\x48\x60\x6c", 8,
+				NULL, 0,
+				NULL, 0,
+				NULL, 0);
+		if (ret == 0)
+			drv->disabled_11b_rates = disabled;
+		return ret;
+	}
+	return nl80211_set_allowed_rates(drv, ifindex, NULL, 0, NULL, 0,
+					 NULL, 0, NULL, 0);
+}
+
+
+static int nl80211_toggle_high_bitrates(struct wpa_driver_nl80211_data *drv,
+					int ifindex, int disabled)
+{
+	/*
+	 * Allow only legacy bitrates less than 12 Mbps and the two slowest MCS
+	 * rates for outgoing traffic.
+	 */
+	if (disabled) {
+		wpa_printf(MSG_DEBUG, "nl80211: Disabling high bitrates");
+		return nl80211_set_allowed_rates(drv, ifindex,
+						 "\x02\x04\x0b\x0c\x16", 5,
+						 "\x0c\x12\x18", 3,
+						 "\x00\x01", 2,
+						 "\x00\x01", 2);
+	}
+
+	wpa_printf(MSG_DEBUG, "nl80211: Enabling high bitrates");
+	return nl80211_set_allowed_rates(drv, ifindex, NULL, 0, NULL, 0,
+					 NULL, 0, NULL, 0);
 }
 
 
@@ -7746,6 +7828,19 @@ static int vendor_reply_handler(struct nl_msg *msg, void *arg)
 	return NL_SKIP;
 }
 
+static int nl80211_disable_high_bitrates(void *priv)
+{
+	struct i802_bss *bss = priv;
+	struct wpa_driver_nl80211_data *drv = bss->drv;
+	return nl80211_toggle_high_bitrates(drv, drv->ifindex, 1);
+}
+
+static int nl80211_enable_high_bitrates(void *priv)
+{
+	struct i802_bss *bss = priv;
+	struct wpa_driver_nl80211_data *drv = bss->drv;
+	return nl80211_toggle_high_bitrates(drv, drv->ifindex, 0);
+}
 
 static int nl80211_vendor_cmd(void *priv, unsigned int vendor_id,
 			      unsigned int subcmd, const u8 *data,
@@ -8795,6 +8890,8 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 	.set_wowlan = nl80211_set_wowlan,
 	.roaming = nl80211_roaming,
 	.set_mac_addr = nl80211_set_mac_addr,
+	.disable_high_bitrates = nl80211_disable_high_bitrates,
+	.enable_high_bitrates = nl80211_enable_high_bitrates,
 #ifdef CONFIG_MESH
 	.init_mesh = wpa_driver_nl80211_init_mesh,
 	.join_mesh = wpa_driver_nl80211_join_mesh,

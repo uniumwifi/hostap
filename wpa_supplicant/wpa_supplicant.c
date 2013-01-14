@@ -2724,6 +2724,18 @@ void wpa_supplicant_select_network(struct wpa_supplicant *wpa_s,
 		wpas_notify_network_selected(wpa_s, ssid);
 }
 
+/**
+ * wpa_supplicant_enable_high_bitrates - Enable high bitrates on an interface.
+ * @wpa_s: wpa_supplicant structure for a network interface
+ *
+ * Enables high bitrates on the interface until the next association.  If
+ * disable_high_bitrates is set on the next association, high rates will be
+ * disabled again.
+ */
+int wpa_supplicant_enable_high_bitrates(struct wpa_supplicant *wpa_s)
+{
+	return wpa_drv_enable_high_bitrates(wpa_s);
+}
 
 /**
  * wpas_set_pkcs11_engine_and_module_path - Set PKCS #11 engine and module path
