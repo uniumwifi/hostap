@@ -204,6 +204,14 @@ dbus_bool_t wpas_dbus_setter_scan_interval(DBusMessageIter *iter,
 					   DBusError *error,
 					   void *user_data);
 
+dbus_bool_t wpas_dbus_getter_roam_threshold(DBusMessageIter *iter,
+					    DBusError *error,
+					    void *user_data);
+
+dbus_bool_t wpas_dbus_setter_roam_threshold(DBusMessageIter *iter,
+					    DBusError *error,
+					    void *user_data);
+
 dbus_bool_t wpas_dbus_getter_disable_high_bitrates(DBusMessageIter *iter,
 						   DBusError *error,
 						   void *user_data);

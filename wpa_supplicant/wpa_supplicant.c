@@ -2900,6 +2900,23 @@ int wpa_supplicant_set_scan_interval(struct wpa_supplicant *wpa_s,
 
 
 /**
+ * wpa_supplicant_set_roam_threshold - Set roam threshold
+ * @wpa_s: wpa_supplicant structure for a network interface
+ * @roam_threshold: roam threshold in dB
+ * Returns: 0 if succeed or -1 if roam_threshold has an invalid value
+ *
+ */
+int wpa_supplicant_set_roam_threshold(struct wpa_supplicant *wpa_s,
+				      unsigned int roam_threshold)
+{
+	wpa_msg(wpa_s, MSG_DEBUG, "Setting roam threshold: %d dB",
+		roam_threshold);
+	wpa_s->conf->roam_threshold = roam_threshold;
+
+	return 0;
+}
+
+/**
  * wpa_supplicant_set_debug_params - Set global debug params
  * @global: wpa_global structure
  * @debug_level: debug level

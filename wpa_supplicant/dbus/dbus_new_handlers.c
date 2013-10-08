@@ -3037,6 +3037,52 @@ dbus_bool_t wpas_dbus_setter_scan_interval(DBusMessageIter *iter,
 
 
 /**
+ * wpas_dbus_getter_roam_threshold - Get roam threshold
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Getter function for "RoamThreshold" property.
+ */
+dbus_bool_t wpas_dbus_getter_roam_threshold(DBusMessageIter *iter,
+					    DBusError *error,
+					    void *user_data)
+{
+	struct wpa_supplicant *wpa_s = user_data;
+	dbus_uint16_t roam_threshold = wpa_s->conf->roam_threshold;
+
+	return wpas_dbus_simple_property_getter(iter, DBUS_TYPE_UINT16,
+						&roam_threshold, error);
+}
+
+
+/**
+ * wpas_dbus_setter_roam_threshold - Control roam threshold
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Setter function for "RoamThreshold" property.
+ */
+dbus_bool_t wpas_dbus_setter_roam_threshold(DBusMessageIter *iter,
+					    DBusError *error,
+					    void *user_data)
+{
+	struct wpa_supplicant *wpa_s = user_data;
+	dbus_uint16_t roam_threshold;
+
+	if (!wpas_dbus_simple_property_setter(iter, error, DBUS_TYPE_UINT16,
+					      &roam_threshold))
+		return FALSE;
+
+	wpa_supplicant_set_roam_threshold(wpa_s, roam_threshold);
+	return TRUE;
+}
+
+
+/**
  * wpas_dbus_getter_disable_high_bitrates - Disable high bitrates for
  * each association on this interface.
  * @iter: Pointer to incoming dbus message iter

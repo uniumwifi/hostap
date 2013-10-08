@@ -1055,6 +1055,8 @@ int wpa_supplicant_set_bss_expiration_count(struct wpa_supplicant *wpa_s,
 					    unsigned int expire_count);
 int wpa_supplicant_set_scan_interval(struct wpa_supplicant *wpa_s,
 				     int scan_interval);
+int wpa_supplicant_set_roam_threshold(struct wpa_supplicant *wpa_s,
+				      unsigned int roam_threshold);
 int wpa_supplicant_set_debug_params(struct wpa_global *global,
 				    int debug_level, int debug_timestamp,
 				    int debug_show_keys);
