@@ -1454,6 +1454,12 @@ void sme_sched_obss_scan(struct wpa_supplicant *wpa_s, int enable)
 	    ssid == NULL || ssid->mode != IEEE80211_MODE_INFRA)
 		return;
 
+#ifdef CONFIG_HT_OVERRIDES
+	/* Check if HT40 is disabled on this network by the user. */
+	if (ssid->disable_ht40)
+		return;
+#endif /* CONFIG_HT_OVERRIDES */
+
 	if (!wpa_s->hw.modes)
 		return;
 

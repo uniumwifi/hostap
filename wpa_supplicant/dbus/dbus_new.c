@@ -2734,6 +2734,14 @@ static const struct wpa_dbus_method_desc wpas_dbus_interface_methods[] = {
 		  END_ARGS
 	  }
 	},
+	{ "SetHT40Enable", WPAS_DBUS_NEW_IFACE_INTERFACE,
+	  (WPADBusMethodHandler) &wpas_dbus_handler_set_ht40_enable,
+	  {
+		  { "path", "o", ARG_IN },
+		  { "enable", "b", ARG_IN },
+		  END_ARGS
+	  }
+	},
 
 #ifdef CONFIG_WPS
 	{ "Start", WPAS_DBUS_NEW_IFACE_WPS,
