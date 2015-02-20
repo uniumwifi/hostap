@@ -3478,6 +3478,56 @@ out:
 
 
 /**
+ * wpas_dbus_getter_sched_scan - Control scheduled
+ * scan
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Getter function for "SchedScan" property.
+ */
+dbus_bool_t wpas_dbus_getter_sched_scan(DBusMessageIter *iter,
+					DBusError *error,
+					void *user_data)
+{
+	struct wpa_supplicant *wpa_s = user_data;
+	dbus_bool_t sched_scan = wpa_s->conf->disable_sched_scan ? FALSE : TRUE;
+
+	return wpas_dbus_simple_property_getter(iter, DBUS_TYPE_BOOLEAN,
+						&sched_scan, error);
+}
+
+
+/**
+ * wpas_dbus_setter_sched_scan - Control scheduled
+ * scan
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Setter function for "SchedScan" property.
+ */
+dbus_bool_t wpas_dbus_setter_sched_scan(DBusMessageIter *iter,
+					DBusError *error,
+					void *user_data)
+{
+	struct wpa_supplicant *wpa_s = user_data;
+	dbus_bool_t sched_scan;
+
+	if (!wpas_dbus_simple_property_setter(iter, error, DBUS_TYPE_BOOLEAN,
+					      &sched_scan))
+		return FALSE;
+
+	wpa_s->conf->disable_sched_scan = sched_scan ? 0 : 1;
+	if (wpa_s->conf->disable_sched_scan)
+		wpa_supplicant_cancel_sched_scan(wpa_s);
+	return TRUE;
+}
+
+
+/**
  * wpas_dbus_getter_pkcs11_engine_path - Get PKCS #11 engine path
  * @iter: Pointer to incoming dbus message iter
  * @error: Location to store error on failure

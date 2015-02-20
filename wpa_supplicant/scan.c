@@ -1186,6 +1186,9 @@ int wpa_supplicant_req_sched_scan(struct wpa_supplicant *wpa_s)
 	if (!wpa_s->sched_scan_supported)
 		return -1;
 
+	if (wpa_s->conf->disable_sched_scan)
+		return -1;
+
 	if (wpa_s->max_sched_scan_ssids > WPAS_MAX_SCAN_SSIDS)
 		max_sched_scan_ssids = WPAS_MAX_SCAN_SSIDS;
 	else
@@ -2260,6 +2263,9 @@ int wpas_start_pno(struct wpa_supplicant *wpa_s)
 	struct wpa_driver_scan_params params;
 
 	if (!wpa_s->sched_scan_supported)
+		return -1;
+
+	if (wpa_s->conf->disable_sched_scan)
 		return -1;
 
 	if (wpa_s->pno || wpa_s->pno_sched_pending)

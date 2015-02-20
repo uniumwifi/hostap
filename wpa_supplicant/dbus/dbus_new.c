@@ -3083,6 +3083,10 @@ static const struct wpa_dbus_property_desc wpas_dbus_interface_properties[] = {
 	  wpas_dbus_getter_scan_interval,
 	  wpas_dbus_setter_scan_interval
 	},
+	{ "SchedScan", WPAS_DBUS_NEW_IFACE_INTERFACE, "b",
+	  wpas_dbus_getter_sched_scan,
+	  wpas_dbus_setter_sched_scan
+	},
 	{ "PKCS11EnginePath", WPAS_DBUS_NEW_IFACE_INTERFACE, "s",
 	  wpas_dbus_getter_pkcs11_engine_path,
 	  NULL

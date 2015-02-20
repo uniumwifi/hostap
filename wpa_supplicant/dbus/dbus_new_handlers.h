@@ -312,6 +312,14 @@ dbus_bool_t wpas_dbus_setter_network_properties(DBusMessageIter *iter,
 						DBusError *error,
 						void *user_data);
 
+dbus_bool_t wpas_dbus_getter_sched_scan(DBusMessageIter *iter,
+					DBusError *error,
+					void *user_data);
+
+dbus_bool_t wpas_dbus_setter_sched_scan(DBusMessageIter *iter,
+					DBusError *error,
+					void *user_data);
+
 DBusMessage * wpas_dbus_handler_wps_start(DBusMessage *message,
 					  struct wpa_supplicant *wpa_s);
 

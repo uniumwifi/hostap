@@ -1190,6 +1190,15 @@ struct wpa_config {
 	int disable_high_bitrates;
 
 	/**
+	 * disable_sched_scan - Disable scheduled scan
+	 *
+	 * By default, scheduled scan is enabled, which allows the driver that
+	 * supports it to take advantage of it. By disabling the scheduled scan,
+	 * driver will not perform any scheduled scan even if the driver supports it.
+	 */
+	int disable_sched_scan;
+
+	/**
 	 * key_mgmt_offload - Use key management offload
 	 *
 	 * Key management offload should be used if the device supports it.
