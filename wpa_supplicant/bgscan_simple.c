@@ -104,12 +104,15 @@ static void bgscan_simple_timeout(void *eloop_ctx, void *timeout_ctx)
 	params.low_priority = !wpa_supplicant_need_scan_results(wpa_s);
 
 	wpa_printf(MSG_DEBUG, "bgscan simple: Request a background scan "
-		   "with reason %s",
-		   timeout_ctx ? (char *)timeout_ctx : "None");
+		   "with reason %s and priority %s",
+		   timeout_ctx ? (char *)timeout_ctx : "None",
+                   params.low_priority ? "low" : "high");
 	if (params.freqs != NULL)
 		log_freqs("Scanning", params.freqs);
 	if (wpa_supplicant_trigger_scan(wpa_s, &params)) {
 		wpa_printf(MSG_DEBUG, "bgscan simple: Failed to trigger scan");
+		eloop_cancel_timeout(bgscan_simple_timeout, data,
+				     ELOOP_ALL_CTX);
 		eloop_register_timeout(data->scan_interval, 0,
 				       bgscan_simple_timeout, data,
 				       "failed-scan");
@@ -296,7 +299,7 @@ static void * bgscan_simple_init(struct wpa_supplicant *wpa_s,
 static void bgscan_simple_deinit(void *priv)
 {
 	struct bgscan_simple_data *data = priv;
-	eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
+	eloop_cancel_timeout(bgscan_simple_timeout, data, ELOOP_ALL_CTX);
 	if (data->signal_threshold)
 		bgscan_deinit_signal_monitor(&data->signal_monitor);
 	os_free(data->supp_freqs);
@@ -353,11 +356,11 @@ static int bgscan_simple_notify_scan(void *priv,
 
 	if (data->signal_threshold)
 		bgscan_poll_signal_monitor(&data->signal_monitor, NULL);
-	eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
 	if (data->scan_interval == data->short_interval)
 		bgscan_reason = "short-interval-scan";
 	else
 		bgscan_reason = "long-interval-scan";
+	eloop_cancel_timeout(bgscan_simple_timeout, data, ELOOP_ALL_CTX);
 	eloop_register_timeout(data->scan_interval, 0, bgscan_simple_timeout,
 			       data, bgscan_reason);
 
@@ -421,7 +424,7 @@ static void bgscan_simple_notify_signal_change(void *priv, int above,
 			 * scan is too far in the future.
 			 */
 			eloop_cancel_timeout(bgscan_simple_timeout, data,
-					     NULL);
+					     ELOOP_ALL_CTX);
 			eloop_register_timeout(data->scan_interval, 0,
 					       bgscan_simple_timeout, data,
 					       "signal-below-short-interval-scan");
@@ -430,7 +433,8 @@ static void bgscan_simple_notify_signal_change(void *priv, int above,
 		wpa_printf(MSG_DEBUG, "bgscan simple: Start using long bgscan "
 			   "interval");
 		data->scan_interval = data->long_interval;
-		eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
+		eloop_cancel_timeout(bgscan_simple_timeout, data,
+				     ELOOP_ALL_CTX);
 		eloop_register_timeout(data->scan_interval, 0,
 				       bgscan_simple_timeout, data,
 				       "signal-above-long-interval-scan");
@@ -446,7 +450,8 @@ static void bgscan_simple_notify_signal_change(void *priv, int above,
 
 	if (scan) {
 		wpa_printf(MSG_DEBUG, "bgscan simple: Trigger immediate scan");
-		eloop_cancel_timeout(bgscan_simple_timeout, data, NULL);
+		eloop_cancel_timeout(bgscan_simple_timeout, data,
+				     ELOOP_ALL_CTX);
 		eloop_register_timeout(0, 0, bgscan_simple_timeout, data,
 				       "signal-below-immediate-scan");
 	}
