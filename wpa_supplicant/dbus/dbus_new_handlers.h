@@ -139,6 +139,9 @@ DBusMessage * wpas_dbus_handler_set_pkcs11_engine_and_module_path(
 DBusMessage * wpas_dbus_handler_enable_high_bitrates(
 	DBusMessage *message, struct wpa_supplicant *wpa_s);
 
+DBusMessage * wpas_dbus_handler_expect_disconnect(DBusMessage *message,
+						  struct wpa_global *global);
+
 DBusMessage * wpas_dbus_handler_set_ht40_enable(DBusMessage *message,
 						struct wpa_supplicant *wpa_s);
 
