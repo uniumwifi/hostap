@@ -1807,6 +1807,62 @@ out:
 }
 
 
+/** wpas_dbus_handler_roam - Send ROAM command to wpa_supplicant
+ * @message: Pointer to incoming dbus message
+ * @wpa_s: wpa_supplicant structure for a network interface
+ * Returns: NULL on success or dbus error on failure
+ *
+ * Handler function for "Roam" method call of network interface.
+*/
+DBusMessage * wpas_dbus_handler_roam(DBusMessage *message,
+				     struct wpa_supplicant *wpa_s)
+{
+#ifdef CONFIG_NO_SCAN_PROCESSING
+	return NULL;
+#else /* CONFIG_NO_SCAN_PROCESSING */
+	char *addr;
+	if (!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &addr,
+	    DBUS_TYPE_INVALID))
+		return wpas_dbus_error_invalid_args(message, NULL);
+	u8 bssid[ETH_ALEN];
+	struct wpa_bss *bss;
+	struct wpa_ssid *ssid = wpa_s->current_ssid;
+
+	if (hwaddr_aton(addr, bssid)) {
+		wpa_printf(MSG_DEBUG, "[dbus-new] ROAM: invalid "
+			   "address '%s'", addr);
+		return NULL;
+	}
+
+	wpa_printf(MSG_DEBUG, "[dbus-new] ROAM " MACSTR, MAC2STR(bssid));
+
+	if (!ssid) {
+		wpa_printf(MSG_DEBUG, "[dbus-new] ROAM: No network "
+			   "configuration known for the target AP");
+		return NULL;
+	}
+
+	bss = wpa_bss_get(wpa_s, bssid, ssid->ssid, ssid->ssid_len);
+	if (!bss) {
+		wpa_printf(MSG_DEBUG, "[dbus-new] ROAM: Target AP not found "
+			   "from BSS table");
+		return NULL;
+	}
+
+	/*
+	 * TODO: Find best network configuration block from configuration to
+	 * allow roaming to other networks
+	 */
+
+	wpa_s->reassociate = 1;
+	wpa_supplicant_connect(wpa_s, bss, ssid);
+
+	return 0;
+#endif /* CONFIG_NO_SCAN_PROCESSING */
+
+}
+
+
 /**
  * wpas_dbus_handler_network_reply - Reply to a NetworkRequest signal
  * @message: Pointer to incoming dbus message
