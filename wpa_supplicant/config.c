@@ -4243,6 +4243,7 @@ static const struct global_parse_data global_fields[] = {
 	{ INT(preassoc_mac_addr), 0 },
 	{ INT_RANGE(disable_high_bitrates, 0, 1), 0 },
 	{ INT_RANGE(disable_sched_scan, 0, 1), 0 },
+	{ INT_RANGE(disable_scan, 0, 1), 0 },
 	{ INT(key_mgmt_offload), 0},
 	{ INT(passive_scan), 0 },
 	{ INT(reassoc_same_bss_optim), 0 },

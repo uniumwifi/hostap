@@ -1199,6 +1199,17 @@ struct wpa_config {
 	int disable_sched_scan;
 
 	/**
+	 * disable_scan - Disable scan
+	 *
+	 * By default, scans are enabled, which allows WPA supplicant to request and
+	 * launch scans in certain situations (e.g. when the interface is
+	 * disconnected). By disabling scans, WPA supplicant will not request or
+	 * launch any scans. This flag does not control scheduled scan
+	 * functionality; if you want to do that, see disable_sched_scan.
+	 */
+	int disable_scan;
+
+	/**
 	 * key_mgmt_offload - Use key management offload
 	 *
 	 * Key management offload should be used if the device supports it.
