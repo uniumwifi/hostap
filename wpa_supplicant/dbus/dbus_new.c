@@ -939,6 +939,52 @@ void wpas_dbus_signal_sta_deauthorized(struct wpa_supplicant *wpa_s,
 }
 
 
+#ifdef CONFIG_TDLS
+
+/**
+ * wpas_dbus_signal_tdls_discover_response - Signals the
+ * reception of a TDLS discover response packet
+ * @wpa_s: %wpa_supplicant network interface data
+ * @sta: Peer mac mac address
+ *
+ * Notify listeners about the reception of a TDLS discover
+ * message
+ */
+void wpas_dbus_signal_tdls_discover_response(struct wpa_supplicant *wpa_s,
+					     const u8 *peer_addr)
+{
+	struct wpas_dbus_priv *iface;
+	DBusMessage *msg;
+	char peer_mac[WPAS_DBUS_OBJECT_PATH_MAX];
+	char *dev_mac;
+
+	os_snprintf(peer_mac, sizeof(peer_mac), MACSTR, MAC2STR(peer_addr));
+	dev_mac = peer_mac;
+
+	iface = wpa_s->global->dbus;
+
+	/* Do nothing if the control interface is not turned on */
+	if (iface == NULL)
+		return;
+
+	msg = dbus_message_new_signal(wpa_s->dbus_new_path,
+				      WPAS_DBUS_NEW_IFACE_INTERFACE,
+				      "TDLSDiscoverResponse");
+	if (msg == NULL)
+		return;
+
+	if (dbus_message_append_args(msg, DBUS_TYPE_STRING, &dev_mac,
+				     DBUS_TYPE_INVALID))
+		dbus_connection_send(iface->con, msg, NULL);
+	else
+		wpa_printf(MSG_ERROR, "dbus: Failed to construct signal");
+	dbus_message_unref(msg);
+
+	wpa_printf(MSG_DEBUG, "dbus: TDLS discover response address '%s'",
+		   dev_mac);
+}
+#endif /* CONFIG_TDLS */
+
 #ifdef CONFIG_P2P
 
 /**
@@ -3417,6 +3463,14 @@ static const struct wpa_dbus_signal_desc wpas_dbus_interface_signals[] = {
 		  END_ARGS
 	  }
 	},
+#ifdef CONFIG_TDLS
+	{ "TDLSDiscoverResponse", WPAS_DBUS_NEW_IFACE_INTERFACE,
+	  {
+		  { "peer_address", "s", ARG_OUT },
+		  END_ARGS
+	  }
+	},
+#endif /* CONFIG_TDLS */
 	{ NULL, NULL, { END_ARGS } }
 };
 

@@ -3161,6 +3161,7 @@ static void wpas_event_rx_mgmt_action(struct wpa_supplicant *wpa_s,
 		wpa_dbg(wpa_s, MSG_DEBUG,
 			"TDLS: Received Discovery Response from " MACSTR,
 			MAC2STR(mgmt->sa));
+		wpas_notify_tdls_discover_response(wpa_s, mgmt->sa);
 		return;
 	}
 #endif /* CONFIG_TDLS */

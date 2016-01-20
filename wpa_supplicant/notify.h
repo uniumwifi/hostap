@@ -140,5 +140,7 @@ void wpas_notify_network_type_changed(struct wpa_supplicant *wpa_s,
 void wpas_notify_p2p_invitation_received(struct wpa_supplicant *wpa_s,
 					 const u8 *sa, const u8 *go_dev_addr,
 					 const u8 *bssid, int id, int op_freq);
+void wpas_notify_tdls_discover_response(struct wpa_supplicant *wpa_s,
+					const u8 *peer_addr);
 
 #endif /* NOTIFY_H */

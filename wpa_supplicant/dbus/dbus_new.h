@@ -552,6 +552,11 @@ void wpas_dbus_signal_p2p_invitation_received(struct wpa_supplicant *wpa_s,
 {
 }
 
+static inline
+void wpas_dbus_signal_tdls_discover_response(struct wpa_supplicant *wpa_s,
+					     const u8 *peer_addr)
+{
+}
 #endif /* CONFIG_CTRL_IFACE_DBUS_NEW */
 
 #endif /* CTRL_IFACE_DBUS_H_NEW */

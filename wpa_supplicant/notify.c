@@ -829,3 +829,11 @@ void wpas_notify_network_type_changed(struct wpa_supplicant *wpa_s,
 	}
 #endif /* CONFIG_P2P */
 }
+
+void wpas_notify_tdls_discover_response(struct wpa_supplicant *wpa_s,
+					const u8 *peer_addr)
+{
+#ifdef CONFIG_TDLS
+	wpas_dbus_signal_tdls_discover_response(wpa_s, peer_addr);
+#endif /* CONFIG_TDLS */
+}
