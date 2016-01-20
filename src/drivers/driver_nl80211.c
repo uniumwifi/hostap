@@ -7828,10 +7828,49 @@ static int vendor_reply_handler(struct nl_msg *msg, void *arg)
 	return NL_SKIP;
 }
 
+static int nl80211_set_critical_protocol(struct wpa_driver_nl80211_data *drv,
+					 int start)
+{
+	struct nl_msg *msg;
+	int ret;
+
+	wpa_printf(MSG_DEBUG, "nl80211: %s: start==%d", __func__, start);
+	if (!(drv->capa.flags & WPA_DRIVER_FLAGS_CRIT_PROTOCOL))
+		return -EOPNOTSUPP;
+
+	msg = nlmsg_alloc();
+	if (!msg)
+		return -ENOMEM;
+
+	if (start) {
+		nl80211_cmd(drv, msg, 0, NL80211_CMD_CRIT_PROTOCOL_START);
+		/* TODO: Don't hardcode DHCP if drivers accept other protos. */
+		NLA_PUT_U16(msg, NL80211_ATTR_CRIT_PROT_ID,
+			    NL80211_CRIT_PROTO_DHCP);
+		NLA_PUT_U16(msg, NL80211_ATTR_MAX_CRIT_PROT_DURATION,
+			    NL80211_CRIT_PROTO_MAX_DURATION);
+	} else
+		nl80211_cmd(drv, msg, 0, NL80211_CMD_CRIT_PROTOCOL_STOP);
+
+	NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, drv->ifindex);
+
+	ret = send_and_recv_msgs(drv, msg, NULL, NULL);
+	if (ret < 0)
+		wpa_printf(MSG_ERROR, "nl80211: %s: ret=%d", __func__, ret);
+	return ret;
+
+nla_put_failure:
+	nlmsg_free(msg);
+	return -ENOBUFS;
+}
+
 static int nl80211_disable_high_bitrates(void *priv)
 {
 	struct i802_bss *bss = priv;
 	struct wpa_driver_nl80211_data *drv = bss->drv;
+	if (drv->capa.flags & WPA_DRIVER_FLAGS_CRIT_PROTOCOL)
+		return nl80211_set_critical_protocol(drv, 1);
+
 	return nl80211_toggle_high_bitrates(drv, drv->ifindex, 1);
 }
 
@@ -7839,6 +7878,9 @@ static int nl80211_enable_high_bitrates(void *priv)
 {
 	struct i802_bss *bss = priv;
 	struct wpa_driver_nl80211_data *drv = bss->drv;
+	if (drv->capa.flags & WPA_DRIVER_FLAGS_CRIT_PROTOCOL)
+		return nl80211_set_critical_protocol(drv, 0);
+
 	return nl80211_toggle_high_bitrates(drv, drv->ifindex, 0);
 }
 

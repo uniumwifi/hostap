@@ -223,6 +223,8 @@ static void wiphy_info_supp_cmds(struct wiphy_info_data *info,
 {
 	struct nlattr *nl_cmd;
 	int i;
+	int crit_start_supported = 0;
+	int crit_stop_supported = 0;
 
 	if (tb == NULL)
 		return;
@@ -247,7 +249,18 @@ static void wiphy_info_supp_cmds(struct wiphy_info_data *info,
 		case NL80211_CMD_SET_QOS_MAP:
 			info->set_qos_map_supported = 1;
 			break;
+		case NL80211_CMD_CRIT_PROTOCOL_START:
+			crit_start_supported = 1;
+			break;
+		case NL80211_CMD_CRIT_PROTOCOL_STOP:
+			crit_stop_supported = 1;
+			break;
 		}
+	}
+
+	if (crit_start_supported && crit_stop_supported) {
+		wpa_printf(MSG_DEBUG, "nl80211: Critical protocol supported");
+		info->capa->flags |= WPA_DRIVER_FLAGS_CRIT_PROTOCOL;
 	}
 }
 

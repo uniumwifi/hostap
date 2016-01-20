@@ -1216,6 +1216,8 @@ struct wpa_driver_capa {
 #define WPA_DRIVER_FLAGS_VHT_IBSS		0x0000002000000000ULL
 /** Driver supports automatic band selection */
 #define WPA_DRIVER_FLAGS_SUPPORT_HW_MODE_ANY	0x0000004000000000ULL
+/* Driver supports critical protocol */
+#define WPA_DRIVER_FLAGS_CRIT_PROTOCOL		0x0000008000000000ULL
 	u64 flags;
 
 #define WPA_DRIVER_SMPS_MODE_STATIC			0x00000001
