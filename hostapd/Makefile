@@ -934,6 +934,8 @@ OBJS += ../src/fst/fst_ctrl_iface.o
 endif
 endif
 
+OBJS += ../src/ap/steering.o
+
 ALL=hostapd hostapd_cli
 
 all: verify_config $(ALL)

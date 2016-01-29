@@ -30,6 +30,9 @@
 #include "hs20.h"
 #include "dfs.h"
 
+#ifdef HOSTAPD
+#include "ap/steering.h"
+#endif
 
 #ifdef NEED_AP_MLME
 
@@ -660,6 +663,9 @@ void handle_probe_req(struct hostapd_data *hapd,
 	int noack;
 	enum ssid_match_result res;
 
+#ifdef HOSTAPD
+	write_probe_timestamp(hapd, mgmt->sa, ssi_signal);
+#endif
 	ie = mgmt->u.probe_req.variable;
 	if (len < IEEE80211_HDRLEN + sizeof(mgmt->u.probe_req))
 		return;

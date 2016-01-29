@@ -37,6 +37,10 @@ struct hapd_global {
 
 static struct hapd_global global;
 
+char *steering_path = NULL;
+int steering_rsi_threshold = -60;
+char *steering_target_interface = NULL;
+
 
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
 static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
@@ -266,6 +270,10 @@ hostapd_interface_init(struct hapd_interfaces *interfaces,
 		return NULL;
 	}
 
+	if (bandsteer_interface_init(iface)) {
+		return NULL;
+	}
+
 	return iface;
 }
 
@@ -327,6 +335,11 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 
 	if (eloop_init()) {
 		wpa_printf(MSG_ERROR, "Failed to initialize event loop");
+		return -1;
+	}
+
+	if (bandsteer_init()) {
+		wpa_printf(MSG_ERROR, "Failed to initialize band steering");
 		return -1;
 	}
 
@@ -457,6 +470,9 @@ static void usage(void)
 		"        (records all messages regardless of debug verbosity)\n"
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
 		"   -t   include timestamps in some debug messages\n"
+		"   -l   log band steering timestamps in this directory\n"
+		"   -r   steering rsi threshold (dbm), dflt=-60\n"
+		"   -s   steering target interface name\n"
 		"   -v   show hostapd version\n");
 
 	exit(1);
@@ -587,7 +603,8 @@ int main(int argc, char *argv[])
 	interfaces.global_ctrl_dst = NULL;
 
 	for (;;) {
-		c = getopt(argc, argv, "b:Bde:f:hKP:Ttu:vg:G:");
+		// TODO(walker): add -r case for steering threshold
+		c = getopt(argc, argv, "b:Bde:f:hKP:Ttu:vg:G:s:l:r:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -648,6 +665,20 @@ int main(int argc, char *argv[])
 		case 'u':
 			return gen_uuid(optarg);
 #endif /* CONFIG_WPS */
+		case 'l':
+			steering_path = optarg;
+			break;
+		case 's':
+			steering_target_interface = optarg;
+			break;
+		case 'r':
+			for (i = 0; optarg[i] && isdigit(optarg[i]); i++);
+			if (optarg[i] == '\0') {
+				steering_rsi_threshold = -atoi(optarg);
+                                wpa_printf(MSG_INFO, "steering_rsi_threshold = %d",
+                                           steering_rsi_threshold);
+			}
+			break;
 		default:
 			usage();
 			break;

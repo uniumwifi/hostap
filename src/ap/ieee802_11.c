@@ -42,6 +42,7 @@
 #include "hw_features.h"
 #include "ieee802_11.h"
 #include "dfs.h"
+#include "ap/steering.h"
 
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
@@ -1773,7 +1774,7 @@ static void send_assoc_resp(struct hostapd_data *hapd, struct sta_info *sta,
 
 static void handle_assoc(struct hostapd_data *hapd,
 			 const struct ieee80211_mgmt *mgmt, size_t len,
-			 int reassoc)
+			 int reassoc, int ssi_signal)
 {
 	u16 capab_info, listen_interval, seq_ctrl, fc;
 	u16 resp = WLAN_STATUS_SUCCESS;
@@ -1837,6 +1838,14 @@ static void handle_assoc(struct hostapd_data *hapd,
 	}
 
 	sta = ap_get_sta(hapd, mgmt->sa);
+
+#ifdef HOSTAPD
+	if (should_steer_on_assoc(hapd, mgmt->sa, ssi_signal, reassoc)) {
+		resp = WLAN_STATUS_ASSOC_REJECTED_TEMPORARILY;
+		goto fail;
+	}
+#endif
+
 #ifdef CONFIG_IEEE80211R
 	if (sta && sta->auth_alg == WLAN_AUTH_FT &&
 	    (sta->flags & WLAN_STA_AUTH) == 0) {
@@ -2348,12 +2357,12 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 		break;
 	case WLAN_FC_STYPE_ASSOC_REQ:
 		wpa_printf(MSG_DEBUG, "mgmt::assoc_req");
-		handle_assoc(hapd, mgmt, len, 0);
+		handle_assoc(hapd, mgmt, len, 0, fi->ssi_signal);
 		ret = 1;
 		break;
 	case WLAN_FC_STYPE_REASSOC_REQ:
 		wpa_printf(MSG_DEBUG, "mgmt::reassoc_req");
-		handle_assoc(hapd, mgmt, len, 1);
+		handle_assoc(hapd, mgmt, len, 1, fi->ssi_signal);
 		ret = 1;
 		break;
 	case WLAN_FC_STYPE_DISASSOC:
