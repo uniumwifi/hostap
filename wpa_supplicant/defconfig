@@ -488,6 +488,16 @@ CONFIG_PEERKEY=y
 # For periodic module:
 #CONFIG_AUTOSCAN_PERIODIC=y
 
+# Background scan
+# This can be used to enable bgscan support in wpa_supplicant.
+# See wpa_supplicant.conf for more information on bgscan usage.
+#
+# Enabling a module will enable bgscan support.
+# For simple:
+#CONFIG_BGSCAN_SIMPLE=y
+# For learning:
+#CONFIG_BGSCAN_LEARN=y
+
 # Password (and passphrase, etc.) backend for external storage
 # These optional mechanisms can be used to add support for storing passwords
 # and other secrets in external (to wpa_supplicant) location. This allows, for
