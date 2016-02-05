@@ -326,6 +326,15 @@ struct hostapd_iface {
 	 * teardown: delete global keys, station keys, and stations.
 	 */
 	unsigned int driver_ap_teardown:1;
+	/*
+	 * when set, indicates that this interface is pat of list of interfaces
+	 * that need to be started together (synchronously).
+	 */
+	unsigned int need_to_start_in_sync:1;
+	/*
+	 * ready to start but waiting for other interfaces to be ready.
+	 */
+	unsigned int ready_to_start_in_sync:1;
 
 	int num_ap; /* number of entries in ap_list */
 	struct ap_info *ap_list; /* AP info list head */

@@ -1517,7 +1517,7 @@ void fst_hostapd_fill_iface_obj(struct hostapd_data *hapd,
  * additional processing before interface is ready to be enabled. Such
  * operations will call this function from eloop callbacks when finished.
  */
-int hostapd_setup_interface_complete(struct hostapd_iface *iface, int err)
+int hostapd_setup_interface_complete_sync(struct hostapd_iface *iface, int err)
 {
 	struct hostapd_data *hapd = iface->bss[0];
 	size_t j;
@@ -1718,7 +1718,68 @@ fail:
 	return -1;
 }
 
-
+int hostapd_setup_interface_complete(struct hostapd_iface *iface, int err)
+{
+	struct hapd_interfaces *interfaces = iface->interfaces;
+	struct hostapd_data *hapd = iface->bss[0];
+	if (iface->need_to_start_in_sync) {
+		int i, not_ready_in_sync_ifaces = 0;
+		if (err) {
+			wpa_printf(MSG_ERROR, "Interface initialization failed");
+			hostapd_set_state(iface, HAPD_IFACE_DISABLED);
+			iface->need_to_start_in_sync = 0;
+			wpa_msg(hapd->msg_ctx, MSG_INFO, AP_EVENT_DISABLED);
+			if (interfaces && interfaces->terminate_on_error)
+				eloop_terminate();
+			return -1;
+		}
+		if ( iface->ready_to_start_in_sync ) {
+			/* already in ready and waiting. should never happpen */
+			return 0;
+		}
+		iface->ready_to_start_in_sync = 1;
+		for (i = 0; i < interfaces->count; i++) {
+			if (interfaces->iface[i]->need_to_start_in_sync &&
+				!interfaces->iface[i]->ready_to_start_in_sync ) {
+				not_ready_in_sync_ifaces = 1;
+				break;
+			}
+		}
+		/*
+		 * check if this is the last interface, if yes then start all
+		 * the other waiting interfaces.
+		 * if not add this interface to the waiting list.
+		 */
+		if (not_ready_in_sync_ifaces) {
+			if (iface->state == HAPD_IFACE_DFS) {
+				/* if this interface went through CAC do not synchronize, just start */
+				iface->need_to_start_in_sync = 0;
+				iface->ready_to_start_in_sync = 0;
+				wpa_printf(MSG_INFO, "%s: Finished CAC Bypass Sync and start Interface ",
+					   iface->bss[0]->conf->iface);
+				return hostapd_setup_interface_complete_sync(iface, err);
+			} else {
+				/* need to wait as there are other interfaces still coming up */
+				wpa_printf(MSG_INFO, "%s: Interface WAITING to sync with other intrfaces",
+						   iface->bss[0]->conf->iface);
+			}
+		} else {
+	        wpa_printf(MSG_INFO, "%s: Last Interface to sync and starting all interfaces ",
+					   iface->bss[0]->conf->iface);
+			for (i = 0; i < interfaces->count; i++) {
+				if (interfaces->iface[i]->need_to_start_in_sync &&
+					interfaces->iface[i]->ready_to_start_in_sync ) {
+					hostapd_setup_interface_complete_sync(interfaces->iface[i],0);
+					/* only once the interfaces are sync started */
+					interfaces->iface[i]->need_to_start_in_sync = 0;
+					interfaces->iface[i]->ready_to_start_in_sync = 0;
+				}
+			}
+		}
+		return 0;
+	}
+	return hostapd_setup_interface_complete_sync(iface, err);
+}
 /**
  * hostapd_setup_interface - Setup of an interface
  * @iface: Pointer to interface data.
