@@ -28,6 +28,9 @@
 # functionality.
 CONFIG_DRIVER_WEXT=y
 
+# MESH networking support (set by wpa_supplicant ebuild)
+#CONFIG_MESH=y
+
 # Driver interface for Linux drivers using the nl80211 kernel interface
 CONFIG_DRIVER_NL80211=y
 
