@@ -3409,6 +3409,8 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "no_auth_if_seen_on") == 0) {
 		os_free(bss->no_auth_if_seen_on);
 		bss->no_auth_if_seen_on = os_strdup(pos);
+	} else if (os_strcmp(buf, "disable_40mhz_scan") == 0) {
+		conf->disable_40mhz_scan = atoi(pos);
 	} else {
 		wpa_printf(MSG_ERROR,
 			   "Line %d: unknown configuration item '%s'",
