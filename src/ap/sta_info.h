@@ -170,6 +170,13 @@ struct sta_info {
 	u16 last_seq_ctrl;
 	/* Last Authentication/(Re)Association Request/Action frame subtype */
 	u8 last_subtype;
+
+#ifdef CONFIG_CLIENT_TAXONOMY
+/* Length of 1536 is arbitrary but larger than any current signature. */
+#define TAXONOMY_STRING_LEN 1536
+	char probe_ie_taxonomy[TAXONOMY_STRING_LEN];
+	char assoc_ie_taxonomy[TAXONOMY_STRING_LEN];
+#endif /* CONFIG_CLIENT_TAXONOMY */
 };
 
 

@@ -43,6 +43,9 @@
 #include "ieee802_11.h"
 #include "dfs.h"
 #include "ap/steering.h"
+#ifdef CONFIG_CLIENT_TAXONOMY
+#include "taxonomy.h"
+#endif /* CONFIG_CLIENT_TAXONOMY */
 
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
@@ -1977,6 +1980,10 @@ static void handle_assoc(struct hostapd_data *hapd,
 	/* Make sure that the previously registered inactivity timer will not
 	 * remove the STA immediately. */
 	sta->timeout_next = STA_NULLFUNC;
+
+#ifdef CONFIG_CLIENT_TAXONOMY
+	hostapd_taxonomy_assoc_req(hapd, sta, pos, left);
+#endif /* CONFIG_CLIENT_TAXONOMY */
 
  fail:
 	send_assoc_resp(hapd, sta, resp, reassoc, pos, left);

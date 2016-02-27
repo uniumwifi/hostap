@@ -34,6 +34,10 @@
 #include "ap/steering.h"
 #endif
 
+#ifdef CONFIG_CLIENT_TAXONOMY
+#include "taxonomy.h"
+#endif /* CONFIG_CLIENT_TAXONOMY */
+
 #ifdef NEED_AP_MLME
 
 static u8 * hostapd_eid_rm_enabled_capab(struct hostapd_data *hapd, u8 *eid,
@@ -759,6 +763,15 @@ void handle_probe_req(struct hostapd_data *hapd,
 		elems.ssid_len = 0;
 	}
 #endif /* CONFIG_P2P */
+
+#ifdef CONFIG_CLIENT_TAXONOMY
+	{
+		struct sta_info *sta = ap_get_sta(hapd, mgmt->sa);
+		if (sta) {
+			hostapd_taxonomy_probe_req(hapd, sta, ie, ie_len);
+		}
+	}
+#endif /* CONFIG_CLIENT_TAXONOMY */
 
 	res = ssid_match(hapd, elems.ssid, elems.ssid_len,
 			 elems.ssid_list, elems.ssid_list_len);

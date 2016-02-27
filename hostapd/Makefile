@@ -934,6 +934,11 @@ OBJS += ../src/fst/fst_ctrl_iface.o
 endif
 endif
 
+ifdef CONFIG_CLIENT_TAXONOMY
+CFLAGS += -DCONFIG_CLIENT_TAXONOMY
+OBJS += ../src/ap/taxonomy.o
+endif
+
 OBJS += ../src/ap/steering.o
 
 ALL=hostapd hostapd_cli
