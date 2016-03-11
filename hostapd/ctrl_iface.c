@@ -71,6 +71,23 @@ static int hostapd_ctrl_iface_attach(struct hostapd_data *hapd,
 {
 	struct wpa_ctrl_dst *dst;
 
+	/* Prevent adding duplicate destination to the list. */
+	dst = hapd->ctrl_dst;
+	while (dst) {
+		if (fromlen == dst->addrlen &&
+		    os_memcmp(from->sun_path, dst->addr.sun_path,
+		              fromlen - offsetof(struct sockaddr_un, sun_path))
+		    == 0) {
+			wpa_hexdump(MSG_DEBUG,
+			            "CTRL_IFACE monitor already attached",
+			            (u8 *) from->sun_path,
+			            fromlen - offsetof(struct sockaddr_un,
+			                               sun_path));
+			return 0;
+		}
+		dst = dst->next;
+	}
+
 	dst = os_zalloc(sizeof(*dst));
 	if (dst == NULL)
 		return -1;
