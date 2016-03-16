@@ -615,7 +615,7 @@ static int sae_derive_commit_element_ecc(struct sae_data *sae,
 				sae->tmp->own_commit_element_ecc) < 0 ||
 	    crypto_ec_point_invert(sae->tmp->ec,
 				   sae->tmp->own_commit_element_ecc) < 0) {
-		wpa_printf(MSG_DEBUG, "SAE: Could not compute commit-element");
+		wpa_printf(MSG_INFO, "SAE: Could not compute commit-element");
 		return -1;
 	}
 
@@ -638,7 +638,7 @@ static int sae_derive_commit_element_ffc(struct sae_data *sae,
 	    crypto_bignum_inverse(sae->tmp->own_commit_element_ffc,
 				  sae->tmp->prime,
 				  sae->tmp->own_commit_element_ffc) < 0) {
-		wpa_printf(MSG_DEBUG, "SAE: Could not compute commit-element");
+		wpa_printf(MSG_INFO, "SAE: Could not compute commit-element");
 		return -1;
 	}
 
@@ -1260,7 +1260,7 @@ int sae_check_confirm(struct sae_data *sae, const u8 *data, size_t len)
 		return -1;
 	}
 
-	wpa_printf(MSG_DEBUG, "SAE: peer-send-confirm %u", WPA_GET_LE16(data));
+	wpa_printf(MSG_INFO, "SAE: peer-send-confirm %u", WPA_GET_LE16(data));
 
 	if (sae->tmp == NULL) {
 		wpa_printf(MSG_DEBUG, "SAE: Temporary data not yet available");
@@ -1281,7 +1281,7 @@ int sae_check_confirm(struct sae_data *sae, const u8 *data, size_t len)
 				   verifier);
 
 	if (os_memcmp_const(verifier, data + 2, SHA256_MAC_LEN) != 0) {
-		wpa_printf(MSG_DEBUG, "SAE: Confirm mismatch");
+		wpa_printf(MSG_INFO, "SAE: Confirm mismatch");
 		wpa_hexdump(MSG_DEBUG, "SAE: Received confirm",
 			    data + 2, SHA256_MAC_LEN);
 		wpa_hexdump(MSG_DEBUG, "SAE: Calculated verifier",

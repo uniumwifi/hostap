@@ -361,7 +361,7 @@ static void mesh_mpm_send_plink_action(struct wpa_supplicant *wpa_s,
 		goto fail;
 	}
 
-	wpa_msg(wpa_s, MSG_DEBUG, "Mesh MPM: Sending peering frame type %d to "
+	wpa_msg(wpa_s, MSG_INFO, "Mesh MPM: Sending peering frame type %d to "
 		MACSTR " (my_lid=0x%x peer_lid=0x%x)",
 		type, MAC2STR(sta->addr), sta->my_lid, sta->peer_lid);
 	ret = wpa_drv_send_action(wpa_s, wpa_s->assoc_freq, 0,
@@ -384,7 +384,7 @@ void wpa_mesh_set_plink_state(struct wpa_supplicant *wpa_s,
 	struct hostapd_sta_add_params params;
 	int ret;
 
-	wpa_msg(wpa_s, MSG_DEBUG, "MPM set " MACSTR " from %s into %s",
+	wpa_msg(wpa_s, MSG_INFO, "MPM set " MACSTR " from %s into %s",
 		MAC2STR(sta->addr), mplstate[sta->plink_state],
 		mplstate[state]);
 	sta->plink_state = state;
@@ -529,7 +529,7 @@ void mesh_mpm_auth_peer(struct wpa_supplicant *wpa_s, const u8 *addr)
 	params.flags = WPA_STA_AUTHENTICATED | WPA_STA_AUTHORIZED;
 	params.set = 1;
 
-	wpa_msg(wpa_s, MSG_DEBUG, "MPM authenticating " MACSTR,
+	wpa_msg(wpa_s, MSG_INFO, "MPM authenticating " MACSTR,
 		MAC2STR(sta->addr));
 	ret = wpa_drv_sta_add(wpa_s, &params);
 	if (ret) {
@@ -736,7 +736,7 @@ static void mesh_mpm_fsm(struct wpa_supplicant *wpa_s, struct sta_info *sta,
 	struct mesh_conf *conf = wpa_s->ifmsh->mconf;
 	u16 reason = 0;
 
-	wpa_msg(wpa_s, MSG_DEBUG, "MPM " MACSTR " state %s event %s",
+	wpa_msg(wpa_s, MSG_INFO, "MPM " MACSTR " state %s event %s",
 		MAC2STR(sta->addr), mplstate[sta->plink_state],
 		mplevent[event]);
 
@@ -940,16 +940,16 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 			   action_field, (unsigned int) ie_len);
 		return;
 	}
-	wpa_printf(MSG_DEBUG, "MPM: Received PLINK action %u", action_field);
+	wpa_printf(MSG_INFO, "MPM: Received PLINK action %u", action_field);
 
 	if (action_field == PLINK_OPEN || action_field == PLINK_CONFIRM) {
-		wpa_printf(MSG_DEBUG, "MPM: Capability 0x%x",
+		wpa_printf(MSG_INFO, "MPM: Capability 0x%x",
 			   WPA_GET_LE16(ies));
 		ies += 2;	/* capability */
 		ie_len -= 2;
 	}
 	if (action_field == PLINK_CONFIRM) {
-		wpa_printf(MSG_DEBUG, "MPM: AID 0x%x", WPA_GET_LE16(ies));
+		wpa_printf(MSG_INFO, "MPM: AID 0x%x", WPA_GET_LE16(ies));
 		ies += 2;	/* aid */
 		ie_len -= 2;
 	}
@@ -983,7 +983,7 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 				       elems.peer_mgmt_len,
 				       &peer_mgmt_ie);
 	if (ret) {
-		wpa_printf(MSG_DEBUG, "MPM: Mesh parsing rejected frame");
+		wpa_printf(MSG_INFO, "MPM: Mesh parsing rejected frame");
 		return;
 	}
 
@@ -991,7 +991,7 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 	plid = WPA_GET_LE16(peer_mgmt_ie.llid);
 	if (peer_mgmt_ie.plid)
 		llid = WPA_GET_LE16(peer_mgmt_ie.plid);
-	wpa_printf(MSG_DEBUG, "MPM: plid=0x%x llid=0x%x", plid, llid);
+	wpa_printf(MSG_INFO, "MPM: plid=0x%x llid=0x%x", plid, llid);
 
 	sta = ap_get_sta(hapd, mgmt->sa);
 
@@ -1011,7 +1011,7 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 #ifdef CONFIG_SAE
 	/* peer is in sae_accepted? */
 	if (sta->sae && sta->sae->state != SAE_ACCEPTED) {
-		wpa_printf(MSG_DEBUG, "MPM: SAE not yet accepted for peer");
+		wpa_printf(MSG_INFO, "MPM: SAE not yet accepted for peer");
 		return;
 	}
 #endif /* CONFIG_SAE */
@@ -1024,12 +1024,12 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 				  &mgmt->u.action.category,
 				  peer_mgmt_ie.chosen_pmk,
 				  ies, ie_len)) {
-		wpa_printf(MSG_DEBUG, "MPM: RSN process rejected frame");
+		wpa_printf(MSG_INFO, "MPM: RSN process rejected frame");
 		return;
 	}
 
 	if (sta->plink_state == PLINK_BLOCKED) {
-		wpa_printf(MSG_DEBUG, "MPM: PLINK_BLOCKED");
+		wpa_printf(MSG_INFO, "MPM: PLINK_BLOCKED");
 		return;
 	}
 

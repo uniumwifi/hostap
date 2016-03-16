@@ -282,7 +282,7 @@ static void send_auth_reply(struct hostapd_data *hapd,
 	if (ies && ies_len)
 		os_memcpy(reply->u.auth.variable, ies, ies_len);
 
-	wpa_printf(MSG_DEBUG, "authentication reply: STA=" MACSTR
+	wpa_printf(MSG_INFO, "authentication reply: STA=" MACSTR
 		   " auth_alg=%d auth_transaction=%d resp=%d (IE len=%lu)",
 		   MAC2STR(dst), auth_alg, auth_transaction,
 		   resp, (unsigned long) ies_len);
@@ -926,7 +926,7 @@ static void handle_auth(struct hostapd_data *hapd,
 	    mgmt->u.auth.variable[1] == WLAN_AUTH_CHALLENGE_LEN)
 		challenge = &mgmt->u.auth.variable[2];
 
-	wpa_printf(MSG_DEBUG, "authentication: STA=" MACSTR " auth_alg=%d "
+	wpa_printf(MSG_INFO, "authentication: STA=" MACSTR " auth_alg=%d "
 		   "auth_transaction=%d status_code=%d wep=%d%s "
 		   "seq_ctrl=0x%x%s",
 		   MAC2STR(mgmt->sa), auth_alg, auth_transaction,
@@ -2053,7 +2053,7 @@ static void handle_deauth(struct hostapd_data *hapd,
 		return;
 	}
 
-	wpa_msg(hapd->msg_ctx, MSG_DEBUG, "deauthentication: STA=" MACSTR
+	wpa_msg(hapd->msg_ctx, MSG_INFO, "deauthentication: STA=" MACSTR
 		" reason_code=%d",
 		MAC2STR(mgmt->sa), le_to_host16(mgmt->u.deauth.reason_code));
 

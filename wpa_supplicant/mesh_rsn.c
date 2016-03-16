@@ -35,7 +35,7 @@ void mesh_auth_timer(void *eloop_ctx, void *user_data)
 	struct sta_info *sta = user_data;
 
 	if (sta->sae->state != SAE_ACCEPTED) {
-		wpa_printf(MSG_DEBUG, "AUTH: Re-authenticate with " MACSTR
+		wpa_printf(MSG_INFO, "AUTH: Re-authenticate with " MACSTR
 			   " (attempt %d) ",
 			   MAC2STR(sta->addr), sta->sae_auth_retry);
 		wpa_msg(wpa_s, MSG_INFO, MESH_SAE_AUTH_FAILURE "addr=" MACSTR,
@@ -309,7 +309,7 @@ int mesh_rsn_auth_sae_sta(struct wpa_supplicant *wpa_s,
 	if (mesh_rsn_build_sae_commit(wpa_s, ssid, sta))
 		return -1;
 
-	wpa_msg(wpa_s, MSG_DEBUG,
+	wpa_msg(wpa_s, MSG_INFO,
 		"AUTH: started authentication with SAE peer: " MACSTR,
 		MAC2STR(sta->addr));
 
