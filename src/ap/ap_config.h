@@ -43,6 +43,17 @@ struct mesh_conf {
 	int dot11MeshRetryTimeout; /* msec */
 	int dot11MeshConfirmTimeout; /* msec */
 	int dot11MeshHoldingTimeout; /* msec */
+	int dot11MeshHwmpMaxPreqRetries;
+	int dot11MeshPathRefreshTime; /* msec */
+	int dot11MeshHwmpActivePathTimeout; /* TUs */
+	int dot11MeshHwmpPreqMinInterval; /* TUs */
+	int dot11MeshHwmpNetDiamTrvsTime;
+	int dot11MeshHwmpRootMode;
+	int dot11MeshHwmpRannInterval;
+	int dot11MeshHwmpGateAnnouncements;
+	int dot11MeshHwmpPathToRootTimeout;
+	int dot11MeshHwmpRootInterval;
+	int dot11MeshHwmpConfirmationInterval;
 };
 
 #define MAX_STA_COUNT 2007

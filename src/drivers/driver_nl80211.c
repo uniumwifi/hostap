@@ -8149,9 +8149,69 @@ static int nl80211_join_mesh(struct i802_bss *bss,
 	if (!(params->conf.flags & WPA_DRIVER_MESH_CONF_FLAG_AUTO_PLINKS) &&
 	    nla_put_u32(msg, NL80211_MESHCONF_AUTO_OPEN_PLINKS, 0))
 		goto fail;
+
 	if ((params->conf.flags & WPA_DRIVER_MESH_FLAG_DRIVER_MPM) &&
 	    nla_put_u16(msg, NL80211_MESHCONF_MAX_PEER_LINKS,
 			params->max_peer_links))
+		goto fail;
+
+	if ((params->conf.flags & WPA_DRIVER_MESH_CONF_FLAG_GATE_ANNOUNCEMENTS) &&
+	    nla_put_u8(msg, NL80211_MESHCONF_GATE_ANNOUNCEMENTS, 1))
+		goto fail;
+
+	if (params->conf.hwmp_max_preq_retries &&
+	    nla_put_u8(msg, NL80211_MESHCONF_HWMP_MAX_PREQ_RETRIES,
+			params->conf.hwmp_max_preq_retries))
+		goto fail;
+
+	if (params->conf.path_refresh_time &&
+	    nla_put_u32(msg, NL80211_MESHCONF_PATH_REFRESH_TIME,
+			params->conf.path_refresh_time))
+		goto fail;
+
+	if (params->conf.hwmp_active_path_timeout &&
+	    nla_put_u32(msg, NL80211_MESHCONF_HWMP_ACTIVE_PATH_TIMEOUT,
+			params->conf.hwmp_active_path_timeout))
+		goto fail;
+
+	if (params->conf.hwmp_preq_min_interval &&
+	    nla_put_u16(msg, NL80211_MESHCONF_HWMP_PREQ_MIN_INTERVAL,
+			params->conf.hwmp_preq_min_interval))
+		goto fail;
+
+	if (params->conf.hwmp_net_diam_trvs_time &&
+	    nla_put_u16(msg, NL80211_MESHCONF_HWMP_NET_DIAM_TRVS_TIME,
+			params->conf.hwmp_net_diam_trvs_time))
+		goto fail;
+
+	if (params->conf.hwmp_root_mode &&
+	    nla_put_u8(msg, NL80211_MESHCONF_HWMP_ROOTMODE,
+			params->conf.hwmp_root_mode))
+		goto fail;
+
+	if (params->conf.hwmp_rann_interval &&
+	    nla_put_u16(msg, NL80211_MESHCONF_HWMP_RANN_INTERVAL,
+			params->conf.hwmp_rann_interval))
+		goto fail;
+
+	if (params->conf.hwmp_perr_min_interval &&
+	    nla_put_u16(msg, NL80211_MESHCONF_HWMP_PERR_MIN_INTERVAL,
+			params->conf.hwmp_perr_min_interval))
+		goto fail;
+
+	if (params->conf.hwmp_path_to_root_timeout &&
+	    nla_put_u32(msg, NL80211_MESHCONF_HWMP_PATH_TO_ROOT_TIMEOUT,
+			params->conf.hwmp_path_to_root_timeout))
+		goto fail;
+
+	if (params->conf.hwmp_root_interval &&
+	    nla_put_u16(msg, NL80211_MESHCONF_HWMP_ROOT_INTERVAL,
+			params->conf.hwmp_root_interval))
+		goto fail;
+
+	if (params->conf.hwmp_confirmation_interval &&
+	    nla_put_u16(msg, NL80211_MESHCONF_HWMP_CONFIRMATION_INTERVAL,
+			params->conf.hwmp_confirmation_interval))
 		goto fail;
 
 	/*

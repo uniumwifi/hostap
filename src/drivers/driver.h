@@ -1061,12 +1061,24 @@ struct wpa_driver_ap_params {
 
 struct wpa_driver_mesh_bss_params {
 #define WPA_DRIVER_MESH_CONF_FLAG_AUTO_PLINKS	0x00000001
+#define WPA_DRIVER_MESH_CONF_FLAG_GATE_ANNOUNCEMENTS	0x00000002
 	/*
 	 * TODO: Other mesh configuration parameters would go here.
 	 * See NL80211_MESHCONF_* for all the mesh config parameters.
 	 */
 	unsigned int flags;
 	int peer_link_timeout;
+	int hwmp_max_preq_retries;
+	int path_refresh_time;
+	int hwmp_active_path_timeout;
+	int hwmp_preq_min_interval;
+	int hwmp_net_diam_trvs_time;
+	int hwmp_root_mode;
+	int hwmp_rann_interval;
+	int hwmp_perr_min_interval;
+	int hwmp_path_to_root_timeout;
+	int hwmp_root_interval;
+	int hwmp_confirmation_interval;
 };
 
 struct wpa_driver_mesh_join_params {

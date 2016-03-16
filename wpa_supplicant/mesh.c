@@ -354,6 +354,23 @@ int wpa_supplicant_join_mesh(struct wpa_supplicant *wpa_s,
 		params.conf.flags |= WPA_DRIVER_MESH_CONF_FLAG_AUTO_PLINKS;
 	}
 	params.conf.peer_link_timeout = wpa_s->conf->mesh_max_inactivity;
+	params.conf.hwmp_max_preq_retries = ssid->dot11MeshHwmpMaxPreqRetries;
+	params.conf.path_refresh_time = ssid->dot11MeshPathRefreshTime;
+	params.conf.hwmp_active_path_timeout =
+		ssid->dot11MeshHwmpActivePathTimeout;
+	params.conf.hwmp_preq_min_interval = ssid->dot11MeshHwmpPreqMinInterval;
+	params.conf.hwmp_net_diam_trvs_time = ssid->dot11MeshHwmpNetDiamTrvsTime;
+	params.conf.hwmp_root_mode = ssid->dot11MeshHwmpRootMode;
+	params.conf.hwmp_rann_interval = ssid->dot11MeshHwmpRannInterval;
+	params.conf.hwmp_perr_min_interval = ssid->dot11MeshHwmpPerrMinInterval;
+	params.conf.hwmp_path_to_root_timeout =
+		ssid->dot11MeshHwmpPathToRootTimeout;
+	params.conf.hwmp_root_interval = ssid->dot11MeshHwmpRootInterval;
+	params.conf.hwmp_confirmation_interval =
+		ssid->dot11MeshHwmpConfirmationInterval;
+	if (ssid->dot11MeshHwmpGateAnnouncements) {
+		params.conf.flags |= WPA_DRIVER_MESH_CONF_FLAG_GATE_ANNOUNCEMENTS;
+	}
 
 	if (wpa_supplicant_mesh_init(wpa_s, ssid)) {
 		wpa_msg(wpa_s, MSG_ERROR, "Failed to init mesh");

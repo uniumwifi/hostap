@@ -444,6 +444,18 @@ struct wpa_ssid {
 	int dot11MeshRetryTimeout; /* msec */
 	int dot11MeshConfirmTimeout; /* msec */
 	int dot11MeshHoldingTimeout; /* msec */
+	int dot11MeshHwmpMaxPreqRetries;
+	int dot11MeshPathRefreshTime; /* msec */
+	int dot11MeshHwmpActivePathTimeout; /* TUs */
+	int dot11MeshHwmpPreqMinInterval; /* TUs */
+	int dot11MeshHwmpNetDiamTrvsTime; /* TUs */
+	int dot11MeshHwmpRootMode;
+	int dot11MeshHwmpRannInterval; /* TUs */
+	int dot11MeshHwmpGateAnnouncements;
+	int dot11MeshHwmpPerrMinInterval; /* TUs */
+	int dot11MeshHwmpPathToRootTimeout; /* TUs */
+	int dot11MeshHwmpRootInterval; /* TUs */
+	int dot11MeshHwmpConfirmationInterval; /* TUs */
 
 	int ht40;
 
