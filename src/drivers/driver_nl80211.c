@@ -2210,6 +2210,8 @@ wpa_driver_nl80211_finish_drv_init(struct wpa_driver_nl80211_data *drv,
 		nlmode = NL80211_IFTYPE_AP;
 	else if (bss->if_dynamic)
 		nlmode = nl80211_get_ifmode(bss);
+	else if (nl80211_get_ifmode(bss) == NL80211_IFTYPE_MESH_POINT)
+		nlmode = NL80211_IFTYPE_MESH_POINT;
 	else
 		nlmode = NL80211_IFTYPE_STATION;
 
