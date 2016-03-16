@@ -280,8 +280,7 @@ void wpa_mesh_notify_peer(struct wpa_supplicant *wpa_s, const u8 *addr,
 {
 	struct ieee802_11_elems elems;
 
-	wpa_msg(wpa_s, MSG_INFO,
-		"new peer notification for " MACSTR, MAC2STR(addr));
+	wpa_msg(wpa_s, MSG_INFO, MESH_PEER_NEW_PEER MACSTR, MAC2STR(addr));
 
 	if (ieee802_11_parse_elems(ies, ie_len, &elems, 0) == ParseFailed) {
 		wpa_msg(wpa_s, MSG_INFO, "Could not parse beacon from " MACSTR,
