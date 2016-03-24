@@ -2802,6 +2802,19 @@ static const struct wpa_dbus_method_desc wpas_dbus_interface_methods[] = {
 		  END_ARGS
 	  }
 	},
+	{ "EnableMACAddressRandomization", WPAS_DBUS_NEW_IFACE_INTERFACE,
+	  (WPADBusMethodHandler) &wpas_dbus_handler_enable_mac_address_randomization,
+	  {
+		  { "mac_mask", "ay", ARG_IN },
+		  END_ARGS
+	  }
+	},
+	{ "DisableMACAddressRandomization", WPAS_DBUS_NEW_IFACE_INTERFACE,
+	  (WPADBusMethodHandler) &wpas_dbus_handler_disable_mac_address_randomization,
+	  {
+		  END_ARGS
+	  }
+	},
 
 #ifdef CONFIG_WPS
 	{ "Start", WPAS_DBUS_NEW_IFACE_WPS,

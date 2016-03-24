@@ -2166,6 +2166,49 @@ out:
 #endif /* CONFIG_HT_OVERRIDES */
 }
 
+DBusMessage * wpas_dbus_handler_enable_mac_address_randomization(
+	DBusMessage *message, struct wpa_supplicant *wpa_s)
+{
+	DBusMessageIter	iter, array_iter;
+	u8 *mask;
+	int mask_len;
+
+	dbus_message_iter_init(message, &iter);
+	dbus_message_iter_recurse(&iter, &array_iter);
+
+	dbus_message_iter_get_fixed_array(&array_iter, &mask, &mask_len);
+	if (mask_len != ETH_ALEN) {
+		return wpas_dbus_error_invalid_args(
+			message, "Malformed MAC address mask");
+	}
+
+	if (wpas_enable_mac_addr_randomization(
+	    wpa_s, MAC_ADDR_RAND_SCAN | MAC_ADDR_RAND_SCHED_SCAN,
+	    wpa_s->perm_addr, mask)) {
+		return wpas_dbus_error_unknown_error(
+			message, "Couldn't enable MAC address randomization");
+	}
+
+	wpa_printf(MSG_DEBUG, "Enabled MAC address randomization with mask: "
+		   MACSTR, MAC2STR(mask));
+
+	return NULL;
+}
+
+DBusMessage * wpas_dbus_handler_disable_mac_address_randomization(
+	DBusMessage *message, struct wpa_supplicant *wpa_s)
+{
+	if (wpas_disable_mac_addr_randomization(
+	    wpa_s, MAC_ADDR_RAND_SCAN | MAC_ADDR_RAND_SCHED_SCAN)) {
+		return wpas_dbus_error_unknown_error(
+			message, "Couldn't disable MAC address randomization");
+	}
+
+	wpa_printf(MSG_DEBUG, "Disabled MAC address randomization");
+
+	return NULL;
+}
+
 /*
  * wpas_dbus_handler_flush_bss - Flush the BSS cache
  * @message: Pointer to incoming dbus message

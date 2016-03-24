@@ -5926,3 +5926,62 @@ void wpas_rrm_handle_link_measurement_request(struct wpa_supplicant *wpa_s,
 	}
 	wpabuf_free(buf);
 }
+
+
+int wpas_enable_mac_addr_randomization(struct wpa_supplicant *wpa_s,
+				       int type, u8 *addr, u8 *mask)
+{
+	if ((addr && !mask) || (!addr && mask)) {
+		wpa_printf(MSG_INFO,
+			   "MAC_ADDR_RAND_SCAN invalid addr/mask combination");
+		return -1;
+	}
+
+	if (addr && mask && (!(mask[0] & 0x01) || (addr[0] & 0x01))) {
+		wpa_printf(MSG_INFO,
+			   "MAC_ADDR_RAND_SCAN cannot allow multicast address");
+		return -1;
+	}
+
+	if (type & MAC_ADDR_RAND_SCAN) {
+		wpas_mac_addr_rand_scan_set(wpa_s, MAC_ADDR_RAND_SCAN,
+					    addr, mask);
+	}
+
+	if (type & MAC_ADDR_RAND_SCHED_SCAN) {
+		wpas_mac_addr_rand_scan_set(wpa_s, MAC_ADDR_RAND_SCHED_SCAN,
+					    addr, mask);
+
+		if (wpa_s->sched_scanning && !wpa_s->pno) {
+			wpa_supplicant_restart_sched_scan(wpa_s);
+		}
+	}
+
+	if (type & MAC_ADDR_RAND_PNO) {
+		wpas_mac_addr_rand_scan_set(wpa_s, MAC_ADDR_RAND_PNO,
+					    addr, mask);
+		if (wpa_s->pno) {
+			wpas_stop_pno(wpa_s);
+			wpas_start_pno(wpa_s);
+		}
+	}
+
+	return 0;
+}
+
+
+int wpas_disable_mac_addr_randomization(struct wpa_supplicant *wpa_s, int type)
+{
+	wpas_mac_addr_rand_scan_clear(wpa_s, type);
+	if (wpa_s->pno) {
+		if (type & MAC_ADDR_RAND_PNO) {
+			wpas_stop_pno(wpa_s);
+			wpas_start_pno(wpa_s);
+		}
+	} else if (wpa_s->sched_scanning &&
+			(type & MAC_ADDR_RAND_SCHED_SCAN)) {
+		wpa_supplicant_restart_sched_scan(wpa_s);
+	}
+
+	return 0;
+}

@@ -1113,6 +1113,10 @@ void wpas_rrm_handle_link_measurement_request(struct wpa_supplicant *wpa_s,
 					      const u8 *frame, size_t len,
 					      int rssi);
 
+int wpas_enable_mac_addr_randomization(struct wpa_supplicant *wpa_s,
+				       int type, u8 *addr, u8 *mask);
+int wpas_disable_mac_addr_randomization(struct wpa_supplicant *wpa_s, int type);
+
 /**
  * wpa_supplicant_ctrl_iface_ctrl_rsp_handle - Handle a control response
  * @wpa_s: Pointer to wpa_supplicant data

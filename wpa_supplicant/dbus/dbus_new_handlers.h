@@ -145,6 +145,11 @@ DBusMessage * wpas_dbus_handler_expect_disconnect(DBusMessage *message,
 DBusMessage * wpas_dbus_handler_set_ht40_enable(DBusMessage *message,
 						struct wpa_supplicant *wpa_s);
 
+DBusMessage * wpas_dbus_handler_enable_mac_address_randomization(
+	DBusMessage *message, struct wpa_supplicant *wpa_s);
+DBusMessage * wpas_dbus_handler_disable_mac_address_randomization(
+	DBusMessage *message, struct wpa_supplicant *wpa_s);
+
 DBusMessage * wpas_dbus_handler_flush_bss(DBusMessage *message,
 					  struct wpa_supplicant *wpa_s);
 
