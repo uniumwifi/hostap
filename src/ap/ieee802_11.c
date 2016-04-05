@@ -1640,6 +1640,9 @@ static void send_deauth(struct hostapd_data *hapd, const u8 *addr,
 
 	send_len = IEEE80211_HDRLEN + sizeof(reply.u.deauth);
 	reply.u.deauth.reason_code = host_to_le16(reason_code);
+	hostapd_logger(hapd, addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_DEBUG, "Sending deauth reason=%d",
+		       reason_code);
 
 	if (hostapd_drv_send_mlme(hapd, &reply, send_len, 0) < 0)
 		wpa_printf(MSG_INFO, "Failed to send deauth: %s",
@@ -2017,7 +2020,8 @@ static void handle_disassoc(struct hostapd_data *hapd,
 	sta->flags &= ~(WLAN_STA_ASSOC | WLAN_STA_ASSOC_REQ_OK);
 	wpa_auth_sm_event(sta->wpa_sm, WPA_DISASSOC);
 	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
-		       HOSTAPD_LEVEL_INFO, "disassociated");
+		       HOSTAPD_LEVEL_INFO, "disassociated (reason=%d)",
+		       le_to_host16(mgmt->u.disassoc.reason_code));
 	sta->acct_terminate_cause = RADIUS_ACCT_TERMINATE_CAUSE_USER_REQUEST;
 	ieee802_1x_notify_port_enabled(sta->eapol_sm, 0);
 	/* Stop Accounting and IEEE 802.1X sessions, but leave the STA
@@ -2071,7 +2075,8 @@ static void handle_deauth(struct hostapd_data *hapd,
 			WLAN_STA_ASSOC_REQ_OK);
 	wpa_auth_sm_event(sta->wpa_sm, WPA_DEAUTH);
 	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
-		       HOSTAPD_LEVEL_DEBUG, "deauthenticated");
+		       HOSTAPD_LEVEL_DEBUG, "deauthenticated (reason=%d)",
+		       le_to_host16(mgmt->u.deauth.reason_code));
 	mlme_deauthenticate_indication(
 		hapd, sta, le_to_host16(mgmt->u.deauth.reason_code));
 	sta->acct_terminate_cause = RADIUS_ACCT_TERMINATE_CAUSE_USER_REQUEST;
@@ -2355,6 +2360,10 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 
 	if (hapd->iconf->track_sta_max_num)
 		sta_track_add(hapd->iface, mgmt->sa);
+
+	hostapd_logger(hapd, mgmt->sa, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_DEBUG, "Received MLME Message:0x%x RSSI=%ddBm",
+		       stype, fi->ssi_signal);
 
 	switch (stype) {
 	case WLAN_FC_STYPE_AUTH:

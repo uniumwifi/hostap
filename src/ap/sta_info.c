@@ -363,7 +363,8 @@ void ap_handle_timer(void *eloop_ctx, void *timeout_ctx)
 	if (sta->timeout_next == STA_REMOVE) {
 		hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
 			       HOSTAPD_LEVEL_INFO, "deauthenticated due to "
-			       "local deauth request");
+			       "local deauth request (reason: deauth=%d)",
+			       sta->deauth_reason);
 		ap_free_sta(hapd, sta);
 		return;
 	}
@@ -707,6 +708,9 @@ void ap_sta_disassociate(struct hostapd_data *hapd, struct sta_info *sta,
 {
 	wpa_printf(MSG_DEBUG, "%s: disassociate STA " MACSTR,
 		   hapd->conf->iface, MAC2STR(sta->addr));
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_INFO, "disassociate STA reason code %d",
+		       reason);
 	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
 	sta->flags &= ~(WLAN_STA_ASSOC | WLAN_STA_ASSOC_REQ_OK);
 	ap_sta_set_authorized(hapd, sta, 0);
@@ -746,6 +750,9 @@ void ap_sta_deauthenticate(struct hostapd_data *hapd, struct sta_info *sta,
 {
 	wpa_printf(MSG_DEBUG, "%s: deauthenticate STA " MACSTR,
 		   hapd->conf->iface, MAC2STR(sta->addr));
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_INFO, "deauthenticate STA reason code %d",
+		       reason);
 	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
 	sta->flags &= ~(WLAN_STA_AUTH | WLAN_STA_ASSOC | WLAN_STA_ASSOC_REQ_OK);
 	ap_sta_set_authorized(hapd, sta, 0);
@@ -1110,6 +1117,10 @@ void ap_sta_disconnect(struct hostapd_data *hapd, struct sta_info *sta,
 
 	if (sta == NULL)
 		return;
+
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_INFO,
+		       "disconnect STA reason code %d", reason);
 	ap_sta_set_authorized(hapd, sta, 0);
 	wpa_auth_sm_event(sta->wpa_sm, WPA_DEAUTH);
 	ieee802_1x_notify_port_enabled(sta->eapol_sm, 0);
