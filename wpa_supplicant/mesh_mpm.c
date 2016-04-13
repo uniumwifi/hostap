@@ -10,6 +10,7 @@
 
 #include "utils/common.h"
 #include "utils/eloop.h"
+#include "common/google-vendor.h"
 #include "common/ieee802_11_defs.h"
 #include "ap/hostapd.h"
 #include "ap/sta_info.h"
@@ -40,6 +41,13 @@ enum plink_event {
 	CNF_IGNR,
 	CLS_ACPT,
 	CLS_IGNR
+};
+
+static const char * const mplaction[] = {
+	[0] = "UNDEFINED",
+	[PLINK_OPEN] = "PLINK_OPEN",
+	[PLINK_CONFIRM] = "PLINK_CONFIRM",
+	[PLINK_CLOSE] = "PLINK_CLOSE",
 };
 
 static const char * const mplstate[] = {
@@ -229,6 +237,7 @@ static void mesh_mpm_send_plink_action(struct wpa_supplicant *wpa_s,
 		  2 + 32 + /* mesh ID */
 		  2 + 7 +  /* mesh config */
 		  2 + 23 + /* peering management */
+		  2 + 8 +  /* Debug Dialog Token */
 		  2 + 96 + /* AMPE */
 		  2 + 16;  /* MIC */
 #ifdef CONFIG_IEEE80211N
@@ -355,15 +364,24 @@ static void mesh_mpm_send_plink_action(struct wpa_supplicant *wpa_s,
 	}
 #endif /* CONFIG_IEEE80211AC */
 
+	/* IE: Google Debug Dialog Token */
+	wpabuf_put_u8(buf, WLAN_EID_VENDOR_SPECIFIC);
+	wpabuf_put_u8(buf, 8);
+	wpabuf_put_be32(buf, (OUI_GOOGLE << 8) | VENDOR_GOOGLE_DEBUG_DIALOG_TOKEN_TYPE);
+	wpabuf_put_le32(buf, wpa_s->google_debug_dialog_token);
+
 	if (ampe && mesh_rsn_protect_frame(wpa_s->mesh_rsn, sta, cat, buf)) {
 		wpa_msg(wpa_s, MSG_INFO,
 			"Mesh MPM: failed to add AMPE and MIC IE");
 		goto fail;
 	}
 
-	wpa_printf(MSG_INFO, "Mesh MPM: Sending peering frame type %d to "
-		MACSTR " (my_lid=0x%x peer_lid=0x%x)",
-		type, MAC2STR(sta->addr), sta->my_lid, sta->peer_lid);
+	wpa_printf(MSG_INFO, "Mesh MPM: Sending peering frame type %d (%s) to "
+		MACSTR " (my_lid=0x%x peer_lid=0x%x) (Debug Dialog Token: %u)",
+		type, mplaction[type], MAC2STR(sta->addr), sta->my_lid, sta->peer_lid,
+		wpa_s->google_debug_dialog_token);
+	wpa_s->google_debug_dialog_token++;
+
 	ret = wpa_drv_send_action(wpa_s, wpa_s->assoc_freq, 0,
 				  sta->addr, wpa_s->own_addr, wpa_s->own_addr,
 				  wpabuf_head(buf), wpabuf_len(buf), 0);
@@ -912,6 +930,7 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 	enum plink_event event;
 	struct ieee802_11_elems elems;
 	struct mesh_peer_mgmt_ie peer_mgmt_ie;
+	u32 google_debug_dialog_token = 0;
 	const u8 *ies;
 	size_t ie_len;
 	int ret;
@@ -954,6 +973,16 @@ void mesh_mpm_action_rx(struct wpa_supplicant *wpa_s,
 	if (ieee802_11_parse_elems(ies, ie_len, &elems, 0) == ParseFailed) {
 		wpa_printf(MSG_DEBUG, "MPM: Failed to parse PLINK IEs");
 		return;
+	}
+	if (elems.google_debug_dialog_token) {
+		if (elems.google_debug_dialog_token_len != sizeof(struct google_debug_dialog_token_ie)) {
+			wpa_printf(MSG_INFO, "MPM: Incorrect size of Debug Dialog Token IE %d",
+				elems.google_debug_dialog_token_len);
+		} else {
+			google_debug_dialog_token = WPA_GET_LE32(elems.google_debug_dialog_token + 4);
+			wpa_printf(MSG_INFO, "MPM: Received %s, Debug Dialog Token: %u",
+				mplaction[action_field], google_debug_dialog_token);
+		}
 	}
 	if (!elems.peer_mgmt) {
 		wpa_printf(MSG_DEBUG,

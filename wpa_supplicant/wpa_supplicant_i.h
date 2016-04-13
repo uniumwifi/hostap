@@ -998,6 +998,8 @@ struct wpa_supplicant {
 	const struct wpabuf *fst_ies;
 	struct wpabuf *received_mb_ies;
 #endif /* CONFIG_FST */
+
+	u32 google_debug_dialog_token;
 };
 
 

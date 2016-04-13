@@ -12,6 +12,7 @@
 #include "defs.h"
 #include "wpa_common.h"
 #include "qca-vendor.h"
+#include "google-vendor.h"
 #include "ieee802_11_defs.h"
 #include "ieee802_11_common.h"
 
@@ -158,6 +159,21 @@ static int ieee802_11_parse_vendor_specific(const u8 *pos, size_t elen,
 			wpa_printf(MSG_EXCESSIVE,
 				   "Unknown QCA information element ignored (type=%d len=%lu)",
 				   pos[3], (unsigned long) elen);
+			return -1;
+		}
+		break;
+
+	case OUI_GOOGLE:
+		switch(pos[3]) {
+		case VENDOR_GOOGLE_DEBUG_DIALOG_TOKEN_TYPE:
+			elems->google_debug_dialog_token = pos;
+			elems->google_debug_dialog_token_len = elen;
+			break;
+		default:
+			wpa_printf(MSG_EXCESSIVE, "Unknown Google "
+				"information element ignored "
+				"(type=%d len=%lu)",
+				pos[3], (unsigned long) elen);
 			return -1;
 		}
 		break;

@@ -31,6 +31,7 @@
 #include "common/version.h"
 #include "rsn_supp/preauth.h"
 #include "rsn_supp/pmksa_cache.h"
+#include "common/google-vendor.h"
 #include "common/wpa_ctrl.h"
 #include "common/ieee802_11_defs.h"
 #include "common/hw_features_common.h"
@@ -4535,6 +4536,17 @@ static int wpa_supplicant_init_iface(struct wpa_supplicant *wpa_s,
 		return -1;
 
 	wpas_rrm_reset(wpa_s);
+
+	/*
+	 * Initialize Google Debug Dialog Token to a random start value, which is
+	 * increased monotonically everytime it's embedded in a management frame.
+	 */
+	if (os_get_random((u8 *) &wpa_s->google_debug_dialog_token,
+		sizeof(wpa_s->google_debug_dialog_token)) < 0) {
+		wpa_s->google_debug_dialog_token = 0;
+	}
+	wpa_printf(MSG_INFO, "MPM: Debug Dialog Token initialized %u (0x%x)",
+		wpa_s->google_debug_dialog_token, wpa_s->google_debug_dialog_token);
 
 	return 0;
 }
