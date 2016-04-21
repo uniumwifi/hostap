@@ -2500,6 +2500,12 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "ft_over_ds") == 0) {
 		bss->ft_over_ds = atoi(pos);
 #endif /* CONFIG_IEEE80211R */
+#ifdef CONFIG_NET_STEERING
+	} else if (os_strcmp(buf, "net_steering_mode") == 0) {
+		os_free(bss->net_steeering_mode);
+		/* can be "off", "suggest", or "force" */
+		bss->net_steeering_mode = os_strdup(pos);
+#endif /* CONFIG_NET_STEERING */
 #ifndef CONFIG_NO_CTRL_IFACE
 	} else if (os_strcmp(buf, "ctrl_interface") == 0) {
 		os_free(bss->ctrl_interface);

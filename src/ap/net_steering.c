@@ -28,6 +28,9 @@ static const u8 tlv_version = 1;
 static const u16 max_score = -1;
 static const u32 flood_timeout_secs = 1;
 static const u32 client_timeout_secs = 10;
+static const char* mode_off = "off";
+static const char* mode_suggest = "suggest";
+static const char* mode_force = "force";
 
 /* Can't change the values of these without bumping the tlv version */
 enum {
@@ -125,6 +128,12 @@ struct net_steering_bss {
 	u16 frame_sn;
 	/* the steering control channel */
 	struct l2_packet_data *control;
+
+	enum {
+		MODE_OFF = 0,
+		MODE_SUGGEST = 1,
+		MODE_FORCE = 2,
+	} mode;
 };
 
 static struct dl_list nsb_list = DL_LIST_HEAD_INIT(nsb_list);
@@ -528,9 +537,12 @@ static void do_client_disassociate(struct net_steering_client* client)
 {
 	static const int transition_timeout = 5;
 
+	char mac[MACSTRLEN];
+	if (!snprintf(mac, MACSTRLEN, MACSTR, MAC2STR(client_get_mac(client)))) return;
+
 	if (client_is_associated(client))
 	{
-		if (client->sta->dot11MgmtOptionBSSTransitionActivated) {
+		if (client->nsb->mode == MODE_SUGGEST || client->sta->dot11MgmtOptionBSSTransitionActivated) {
 			hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_INFO, "Fast BSS transition for "MACSTR" to "MACSTR" on channel %d\n",
 				MAC2STR(client_get_mac(client)), MAC2STR(client_get_remote_bssid(client)), client->remote_channel);
@@ -541,8 +553,6 @@ static void do_client_disassociate(struct net_steering_client* client)
 			hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_INFO, "Disassociate "MACSTR"\n", MAC2STR(client_get_mac(client)));
 
-			char mac[MACSTRLEN];
-			if (!snprintf(mac, MACSTRLEN, MACSTR, MAC2STR(client_get_mac(client)))) return;
 			if (hostapd_ctrl_iface_disassociate(client->nsb->hapd, mac))
 			{
 				hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
@@ -558,32 +568,35 @@ static void do_client_disassociate(struct net_steering_client* client)
 
 static void do_client_blacklist_add(struct net_steering_client* client)
 {
-	char mac[MACSTRLEN];
-	if (!snprintf(mac, MACSTRLEN, MACSTR, MAC2STR(client_get_mac(client)))) return;
+	if (client->nsb->mode == MODE_FORCE) {
+		char mac[MACSTRLEN];
+		if (!snprintf(mac, MACSTRLEN, MACSTR, MAC2STR(client_get_mac(client)))) return;
 
-	hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-		HOSTAPD_LEVEL_WARNING, "Blacklist add "MACSTR"\n",
-		MAC2STR(client_get_mac(client)));
-
-	if (hostapd_ctrl_iface_blacklist_add(client->nsb->hapd, mac))
-	{
 		hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_WARNING, "Failed to blacklist %s\n", mac);
+			HOSTAPD_LEVEL_WARNING, "Blacklist add "MACSTR"\n",
+			MAC2STR(client_get_mac(client)));
+
+		if (hostapd_ctrl_iface_blacklist_add(client->nsb->hapd, mac)) {
+			hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "Failed to blacklist %s\n", mac);
+		}
 	}
 }
 
 static void do_client_blacklist_rm(struct net_steering_client* client)
 {
-	char mac[MACSTRLEN];
-	if (!snprintf(mac, MACSTRLEN, MACSTR, MAC2STR(client_get_mac(client)))) return;
+	if (client->nsb->mode == MODE_FORCE) {
+		char mac[MACSTRLEN];
+		if (!snprintf(mac, MACSTRLEN, MACSTR, MAC2STR(client_get_mac(client)))) return;
 
-	hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-		HOSTAPD_LEVEL_WARNING, "Blacklist remove "MACSTR"\n", MAC2STR(client_get_mac(client)));
-
-	if (hostapd_ctrl_iface_blacklist_rm(client->nsb->hapd, mac))
-	{
 		hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_WARNING, "Failed to remove %s from blacklist\n", mac);
+			HOSTAPD_LEVEL_WARNING, "Blacklist remove "MACSTR"\n", MAC2STR(client_get_mac(client)));
+
+		if (hostapd_ctrl_iface_blacklist_rm(client->nsb->hapd, mac))
+		{
+			hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "Failed to remove %s from blacklist\n", mac);
+		}
 	}
 }
 
@@ -828,12 +841,18 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 	/* update the remote bssid */
 	client_set_remote_bssid(client, bssid);
 
-	if (score == max_score) {
-		SM_STEP_EVENT_RUN(STEERING, E_PEER_LOST_CLIENT, client);
-	} else if (score > client->score) {
-		SM_STEP_EVENT_RUN(STEERING, E_PEER_IS_WORSE, client);
-	} else if (client->score != max_score) {
-		SM_STEP_EVENT_RUN(STEERING, E_PEER_NOT_WORSE, client);
+	/* if we hear scores from another, assume the STA has disassociated */
+	if (client_is_associated(client)) {
+		do_client_disassociate(client);
+		SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
+	} else {
+		if (score == max_score) {
+			SM_STEP_EVENT_RUN(STEERING, E_PEER_LOST_CLIENT, client);
+		} else if (score > client->score) {
+			SM_STEP_EVENT_RUN(STEERING, E_PEER_IS_WORSE, client);
+		} else if (client->score != max_score) {
+			SM_STEP_EVENT_RUN(STEERING, E_PEER_NOT_WORSE, client);
+		}
 	}
 }
 
@@ -1092,6 +1111,10 @@ void net_steering_deinit(struct hostapd_data *hapd)
 
 int net_steering_init(struct hostapd_data *hapd)
 {
+	/* see if there is any configuration */
+	if (!hapd->conf->net_steeering_mode) return 0;
+	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) return 0;
+
 	struct net_steering_bss* nsb = (struct net_steering_bss*) os_zalloc(sizeof(*nsb));
 
 	if (!nsb) return -1;
@@ -1116,8 +1139,13 @@ int net_steering_init(struct hostapd_data *hapd)
 	hostapd_register_probereq_cb(hapd, probe_req_cb, nsb);
 
 	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_INFO, "ready on %s with bssid "MACSTR" own addr "MACSTR"\n",
-			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid), MAC2STR(nsb->hapd->own_addr));
+			HOSTAPD_LEVEL_INFO, "ready on %s with bssid "MACSTR" own addr "MACSTR": mode: %s\n",
+			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid), MAC2STR(nsb->hapd->own_addr),
+			hapd->conf->net_steeering_mode);
+
+	if (os_strcmp(hapd->conf->net_steeering_mode, mode_suggest) == 0) nsb->mode = MODE_SUGGEST;
+	else if (os_strcmp(hapd->conf->net_steeering_mode, mode_force) == 0) nsb->mode = MODE_FORCE;
+	else nsb->mode = MODE_FORCE;
 
 	// TODO maybe we should not track bss that don't have peer configs, ie
 	// just exit.
