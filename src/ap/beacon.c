@@ -38,6 +38,8 @@
 #include "taxonomy.h"
 #endif /* CONFIG_CLIENT_TAXONOMY */
 
+#include "sta_blacklist.h"
+
 #ifdef NEED_AP_MLME
 
 static u8 * hostapd_eid_rm_enabled_capab(struct hostapd_data *hapd, u8 *eid,
@@ -828,6 +830,11 @@ void handle_probe_req(struct hostapd_data *hapd,
 		return;
 	}
 #endif /* CONFIG_P2P */
+
+	if(sta_blacklist_present(hapd, mgmt->sa)) {
+		wpa_printf(MSG_DEBUG, "ignoring probe request from " MACSTR " ignored due to blacklist", MAC2STR(mgmt->sa));
+		return;
+	}
 
 	/* TODO: verify that supp_rates contains at least one matching rate
 	 * with AP configuration */

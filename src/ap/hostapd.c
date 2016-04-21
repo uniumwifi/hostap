@@ -1839,6 +1839,7 @@ hostapd_alloc_bss_data(struct hostapd_iface *hapd_iface,
 	hapd->iface = hapd_iface;
 	hapd->driver = hapd->iconf->driver;
 	hapd->ctrl_sock = -1;
+	hapd->blacklist = NULL;
 
 	return hapd;
 }

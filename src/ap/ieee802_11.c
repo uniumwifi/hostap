@@ -28,6 +28,7 @@
 #include "beacon.h"
 #include "ieee802_11_auth.h"
 #include "sta_info.h"
+#include "sta_blacklist.h"
 #include "ieee802_1x.h"
 #include "wpa_auth.h"
 #include "pmksa_cache_auth.h"
@@ -943,6 +944,15 @@ static void handle_auth(struct hostapd_data *hapd,
 		goto fail;
 	}
 #endif /* CONFIG_NO_RC4 */
+
+	// Check for existence in blacklist
+	if(sta_blacklist_present(hapd, mgmt->sa)) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			       HOSTAPD_LEVEL_INFO, "auth failed from " MACSTR " due to blacklist", MAC2STR(mgmt->sa));
+
+		resp = WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA;
+		goto fail;
+	}
 
 	if (hapd->tkip_countermeasures) {
 		resp = WLAN_REASON_MICHAEL_MIC_FAILURE;

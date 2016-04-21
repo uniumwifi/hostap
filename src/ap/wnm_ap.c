@@ -594,3 +594,168 @@ int wnm_send_bss_tm_req(struct hostapd_data *hapd, struct sta_info *sta,
 
 	return 0;
 }
+
+/*
+802.11-2012 10.23.6.3 BSS transition management request
+The AP may send an unsolicited BSS Transition
+Management Request frame to a non-AP STA at any time if the non-AP STA indicates that it supports the
+BSS Transition Management capability in the Extended Capabilities element.
+A non-AP STA that supports BSS transition management shall
+respond to an individually addressed BSS Transition Management Request frame with a BSS Transition
+Management Response frame.
+*/
+int wnm_send_bss_transition(struct hostapd_data *hapd,
+				   struct sta_info *sta, int disassoc_timer, const u8 *ap_addr, u8 ap_channel)
+{
+	u8 buf[1000], *pos;
+	struct ieee80211_mgmt *mgmt;
+	u8 report_ie_len;
+	struct wnm_neighbor_report_element report_ie;
+
+	size_t url_len;
+
+	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+		   HOSTAPD_LEVEL_INFO, "WNM: wnm_send_ess_disassoc_move client " MACSTR " (disassoc_timer=%d) to AP "
+		   MACSTR, MAC2STR(sta->addr), disassoc_timer, MAC2STR(ap_addr));
+
+	os_memset(buf, 0, sizeof(buf));
+	mgmt = (struct ieee80211_mgmt *) buf;
+	mgmt->frame_control = IEEE80211_FC(WLAN_FC_TYPE_MGMT,
+					   WLAN_FC_STYPE_ACTION);
+	os_memcpy(mgmt->da, sta->addr, ETH_ALEN);
+	os_memcpy(mgmt->sa, hapd->own_addr, ETH_ALEN);
+	os_memcpy(mgmt->bssid, hapd->own_addr, ETH_ALEN);
+	mgmt->u.action.category = WLAN_ACTION_WNM;
+	mgmt->u.action.u.bss_tm_req.action = WNM_BSS_TRANS_MGMT_REQ;
+	mgmt->u.action.u.bss_tm_req.dialog_token = 1;
+	mgmt->u.action.u.bss_tm_req.req_mode =
+		WNM_BSS_TM_REQ_DISASSOC_IMMINENT |
+		//WNM_BSS_TM_REQ_ESS_DISASSOC_IMMINENT |
+		WNM_BSS_TM_REQ_PREF_CAND_LIST_INCLUDED;
+	mgmt->u.action.u.bss_tm_req.disassoc_timer =
+		host_to_le16(disassoc_timer);
+	mgmt->u.action.u.bss_tm_req.validity_interval = 100;
+
+	pos = mgmt->u.action.u.bss_tm_req.variable;
+
+	/* 802.11-2012
+	The BSS Transition Candidate List Entries field of a BSS Transition Management Response frame contains
+	zero or more Neighbor Report elements describing the non-AP STA’s preferences for target BSS
+	candidates. The Preference field value of a Neighbor Report element used in a BSS Transition Management
+	Response frame shall be between 1 and 255. The value of 0 is reserved. The values between 1 and 255
+	provide the indication of order, with 255 indicating the most preferred BSS within the given candidate list,
+	decreasing numbers representing decreasing preference relative only to entries with lower values of the
+	Preference field, and equal numbers representing equal preference. The non-AP STA should not list any
+	BSS that is not considered as a target BSS candidate.
+
+
+	Contains the description of candidate BSS transition APs and their capabilities as described in 8.4.2.39.
+	*/
+		os_memset(&report_ie, 0, sizeof(struct wnm_neighbor_report_element));
+		report_ie_len = sizeof(struct wnm_neighbor_report_element);
+		report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
+		report_ie.len = report_ie_len - 2 + 3;
+		os_memcpy(report_ie.bssid, ap_addr, 6);
+		report_ie.channel_number = ap_channel;
+
+		// The AP Reachability field indicates whether the AP identified by this BSSID is reachable by the STA that
+		// requested the neighbor report. For example, the AP identified by this BSSID is reachable for the exchange of
+		// preauthentication frames as described in 11.5.9.2
+
+		// The Security bit, if 1, indicates that the AP identified by this BSSID supports the same security provisioning
+		// as used by the STA in its current association.
+		report_ie.bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
+//#ifdef CONFIG_IEEE80211R
+		// The Mobility Domain bit is set to 1 to indicate that the AP represented by this BSSID is including an MDE
+		// in its Beacon frames and that the contents of that MDE are identical to the MDE advertised by the AP sending
+		// the report.
+		if (wpa_key_mgmt_ft(hapd->wpa_auth->conf.wpa_key_mgmt)) {
+			report_ie.bssid_info[1] = WNM_MOBILITY_DOMAIN;
+		}
+//#endif
+
+		os_memcpy(pos, &report_ie, report_ie_len);
+
+		// copy single neighbor report IE here
+		pos += report_ie_len;
+
+		// BSS Transition Candidate Preference subelement field
+		*pos++ = 3;
+		*pos++ = 1;
+		*pos++ = 255;
+		report_ie_len += 3;
+
+		/*
+		os_memset(&report_ie, 0, sizeof(struct wnm_neighbor_report_element));
+		report_ie_len = sizeof(struct wnm_neighbor_report_element);
+		report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
+		report_ie.len = report_ie_len - 2 + 3;
+
+		os_memcpy(report_ie.bssid, hapd->own_addr, 6);
+		report_ie.bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
+//#ifdef CONFIG_IEEE80211R
+		// The Mobility Domain bit is set to 1 to indicate that the AP represented by this BSSID is including an MDE
+		// in its Beacon frames and that the contents of that MDE are identical to the MDE advertised by the AP sending
+		// the report.
+		if (wpa_key_mgmt_ft(hapd->wpa_auth->conf.wpa_key_mgmt)) {
+			report_ie.bssid_info[1] = WNM_MOBILITY_DOMAIN;
+		}
+//#endif
+
+		report_ie.channel_number = hapd->iconf->channel;
+
+		os_memcpy(pos, &report_ie, report_ie_len);
+
+		// copy single neighbor report IE here
+		pos += report_ie_len;
+
+		// BSS Transition Candidate Preference subelement field
+		*pos++ = 3;
+		*pos++ = 1;
+		*pos++ = 0;
+		report_ie_len += 3;
+		*/
+
+		if (hostapd_drv_send_mlme(hapd, buf, pos - buf, 0) < 0) {
+			hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+				HOSTAPD_LEVEL_WARNING, "Failed to send BSS Transition Management Request frame");
+
+	//	wpa_printf(MSG_DEBUG, "Failed to send BSS Transition "
+	//		   "Management Request frame");
+		return -1;
+	}
+
+	/* send disassociation frame after time-out */
+	if (disassoc_timer) {
+		int timeout, beacon_int;
+
+		/*
+		 * Prevent STA from reconnecting using cached PMKSA to force
+		 * full authentication with the authentication server (which may
+		 * decide to reject the connection),
+		 */
+		wpa_auth_pmksa_remove(hapd->wpa_auth, sta->addr);
+
+		beacon_int = hapd->iconf->beacon_int;
+		if (beacon_int < 1)
+			beacon_int = 100; /* best guess */
+
+		/* Calculate timeout in ms based on beacon_int in TU 100 beacon inteval*/
+		timeout = disassoc_timer * (beacon_int * 128 / 125);
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+				HOSTAPD_LEVEL_DEBUG, "Disassociation timer for " MACSTR
+				" set to %d ms", MAC2STR(sta->addr), timeout);
+
+		//wpa_printf(MSG_DEBUG, "Disassociation timer for " MACSTR
+		//	   " set to %d ms", MAC2STR(sta->addr), timeout);
+
+		sta->timeout_next = STA_DISASSOC_FROM_CLI;
+		eloop_cancel_timeout(ap_handle_timer, hapd, sta);
+		eloop_register_timeout(timeout / 1000,
+				       timeout % 1000 * 1000,
+				       ap_handle_timer, hapd, sta);
+	}
+
+	return 0;
+}
+
