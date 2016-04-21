@@ -68,7 +68,7 @@ static const char *const commands_help =
 "   blacklist_add <addr>  blacklist a station from an AP\n"
 "   blacklist_rm <addr>   remove a station from the blacklist\n"
 "   blacklist_clr         clear all stations from the blacklist\n"
-"   blacklist_show_hostapd        show entire blacklist\n"
+"   blacklist_show        show entire blacklist\n"
 "   bss_transition <addr> <beacon timer count> <AP addr> <AP channel> disassociate a WNM station telling the station which AP to connect to\n"
 #ifdef CONFIG_IEEE80211W
 "   sa_query <addr>      send SA Query to a station\n"
@@ -382,13 +382,13 @@ static int hostapd_cli_cmd_blacklist_rm_hostapd(struct wpa_ctrl *ctrl, int argc,
 	return wpa_ctrl_command(ctrl, buf);
 }
 
-static int hostapd_cli_cmd_blacklist_show_hostapd(struct wpa_ctrl *ctrl, int argc,
+static int hostapd_cli_cmd_blacklist_show(struct wpa_ctrl *ctrl, int argc,
 					char *argv[])
 {
 	char buf[64];
 
 	if (argc > 0) {
-		printf("Invalid 'blacklist_show_hostapd' command - this command takes no arguments.\n");
+		printf("Invalid 'blacklist_show' command - this command takes no arguments.\n");
 		return -1;
 	}
 
@@ -1169,7 +1169,7 @@ static const struct hostapd_cli_cmd hostapd_cli_commands[] = {
 	{ "blacklist_add", hostapd_cli_cmd_blacklist_add_hostapd },
 	{ "blacklist_rm", hostapd_cli_cmd_blacklist_rm_hostapd },
 
-	{ "blacklist_show_hostapd", hostapd_cli_cmd_blacklist_show_hostapd },
+	{ "blacklist_show", hostapd_cli_cmd_blacklist_show },
 	{ "blacklist_clr", hostapd_cli_cmd_blacklist_clr_hostapd },
 
 #ifdef CONFIG_IEEE80211W

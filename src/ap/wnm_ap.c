@@ -1,6 +1,7 @@
 /*
  * hostapd - WNM
  * Copyright (c) 2011-2014, Qualcomm Atheros, Inc.
+ * Copyright (c) 2015, CoCo Communications, Inc.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -612,8 +613,6 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	u8 report_ie_len;
 	struct wnm_neighbor_report_element report_ie;
 
-	size_t url_len;
-
 	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
 		   HOSTAPD_LEVEL_INFO, "WNM: wnm_send_ess_disassoc_move client " MACSTR " (disassoc_timer=%d) to AP "
 		   MACSTR, MAC2STR(sta->addr), disassoc_timer, MAC2STR(ap_addr));
@@ -654,89 +653,49 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 
 	Contains the description of candidate BSS transition APs and their capabilities as described in 8.4.2.39.
 	*/
-		os_memset(&report_ie, 0, sizeof(struct wnm_neighbor_report_element));
-		report_ie_len = sizeof(struct wnm_neighbor_report_element);
-		report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
-		report_ie.len = report_ie_len - 2 + 3;
-		os_memcpy(report_ie.bssid, ap_addr, 6);
-		report_ie.operating_class = 12; // todo will need to fix for 5ghz or 20ht
+	os_memset(&report_ie, 0, sizeof(struct wnm_neighbor_report_element));
+	report_ie_len = sizeof(struct wnm_neighbor_report_element);
+	report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
+	report_ie.len = report_ie_len - 2 + 3;
+	os_memcpy(report_ie.bssid, ap_addr, 6);
+	report_ie.operating_class = 12; // todo will need to fix for 5ghz or 20ht
 
-		// dot11RMNeighborReportPhyType OBJECT-TYPE
-		// SYNTAX INTEGER {
-		// fhss(1),
-		// dsss(2),
-		// irbaseband(3),
-		// ofdm(4),
-		// hrdsss(5),
-		// erp(6),
-		// ht(7) }
-		//report_ie.PHY_type =
-		report_ie.channel_number = ap_channel;
+	// dot11RMNeighborReportPhyType OBJECT-TYPE
+	// SYNTAX INTEGER {
+	// fhss(1),
+	// dsss(2),
+	// irbaseband(3),
+	// ofdm(4),
+	// hrdsss(5),
+	// erp(6),
+	// ht(7) }
+	//report_ie.PHY_type =
+	report_ie.channel_number = ap_channel;
 
-		// The AP Reachability field indicates whether the AP identified by this BSSID is reachable by the STA that
-		// requested the neighbor report. For example, the AP identified by this BSSID is reachable for the exchange of
-		// preauthentication frames as described in 11.5.9.2
+	// The AP Reachability field indicates whether the AP identified by this BSSID is reachable by the STA that
+	// requested the neighbor report. For example, the AP identified by this BSSID is reachable for the exchange of
+	// preauthentication frames as described in 11.5.9.2
 
-		// The Security bit, if 1, indicates that the AP identified by this BSSID supports the same security provisioning
-		// as used by the STA in its current association.
-		report_ie.bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
-//#ifdef CONFIG_IEEE80211R
-		// The Mobility Domain bit is set to 1 to indicate that the AP represented by this BSSID is including an MDE
-		// in its Beacon frames and that the contents of that MDE are identical to the MDE advertised by the AP sending
-		// the report.
-		if (wpa_key_mgmt_ft(hapd->wpa_auth->conf.wpa_key_mgmt)) {
-			report_ie.bssid_info[1] = WNM_MOBILITY_DOMAIN;
-		}
-//#endif
+	// The Security bit, if 1, indicates that the AP identified by this BSSID supports the same security provisioning
+	// as used by the STA in its current association.
+	report_ie.bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
 
-		os_memcpy(pos, &report_ie, report_ie_len);
+	os_memcpy(pos, &report_ie, report_ie_len);
 
-		// copy single neighbor report IE here
-		pos += report_ie_len;
+	// copy single neighbor report IE here
+	pos += report_ie_len;
 
-		// BSS Transition Candidate Preference subelement field
-		*pos++ = 3;
-		*pos++ = 1;
-		*pos++ = 255;
-		report_ie_len += 3;
+	// BSS Transition Candidate Preference subelement field
+	*pos++ = 3;
+	*pos++ = 1;
+	*pos++ = 255;
+	report_ie_len += 3;
 
-		/*
-		os_memset(&report_ie, 0, sizeof(struct wnm_neighbor_report_element));
-		report_ie_len = sizeof(struct wnm_neighbor_report_element);
-		report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
-		report_ie.len = report_ie_len - 2 + 3;
+	if (hostapd_drv_send_mlme(hapd, buf, pos - buf, 0) < 0) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_WARNING, "Failed to send BSS Transition Management Request frame");
 
-		os_memcpy(report_ie.bssid, hapd->own_addr, 6);
-		report_ie.bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
-//#ifdef CONFIG_IEEE80211R
-		// The Mobility Domain bit is set to 1 to indicate that the AP represented by this BSSID is including an MDE
-		// in its Beacon frames and that the contents of that MDE are identical to the MDE advertised by the AP sending
-		// the report.
-		if (wpa_key_mgmt_ft(hapd->wpa_auth->conf.wpa_key_mgmt)) {
-			report_ie.bssid_info[1] = WNM_MOBILITY_DOMAIN;
-		}
-//#endif
-
-		report_ie.channel_number = hapd->iconf->channel;
-
-		os_memcpy(pos, &report_ie, report_ie_len);
-
-		// copy single neighbor report IE here
-		pos += report_ie_len;
-
-		// BSS Transition Candidate Preference subelement field
-		*pos++ = 3;
-		*pos++ = 1;
-		*pos++ = 0;
-		report_ie_len += 3;
-		*/
-
-		if (hostapd_drv_send_mlme(hapd, buf, pos - buf, 0) < 0) {
-			hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
-				HOSTAPD_LEVEL_WARNING, "Failed to send BSS Transition Management Request frame");
-
-	//	wpa_printf(MSG_DEBUG, "Failed to send BSS Transition "
-	//		   "Management Request frame");
+		wpa_printf(MSG_DEBUG, "Failed to send BSS Transition Management Request frame");
 		return -1;
 	}
 

@@ -546,7 +546,7 @@ int hostapd_ctrl_iface_blacklist_rm(struct hostapd_data *hapd,
 int hostapd_ctrl_iface_blacklist_show(struct hostapd_data *hapd, char *buf,
 		size_t buflen)
 {
-	int len = 0, ret = - 1;
+	int len = 0, ret = 0;
 	struct sta_blacklist *e = hapd->blacklist;
 
 	while (e) {

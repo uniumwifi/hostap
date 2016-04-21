@@ -1,6 +1,7 @@
 /*
  * IEEE 802.11v WNM related functions and structures
  * Copyright (c) 2011-2014, Qualcomm Atheros, Inc.
+ * Copyright (c) 2015, CoCo Communications, Inc.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.

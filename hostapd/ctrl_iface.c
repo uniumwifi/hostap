@@ -1090,8 +1090,7 @@ static int hostapd_ctrl_iface_bss_transition(struct hostapd_data *hapd,
 	sta = ap_get_sta(hapd, addr);
 	if (sta == NULL) {
 		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
-			HOSTAPD_LEVEL_WARNING, " not found for BSS transition message",
-			   MAC2STR(addr));
+			HOSTAPD_LEVEL_WARNING, " not found for BSS transition message");
 
 		//wpa_printf(MSG_DEBUG, "Station " MACSTR
 		//	   " not found for BSS transition message",
@@ -2352,6 +2351,10 @@ static int hostapd_ctrl_iface_receive_process(struct hostapd_data *hapd,
 	} else if (os_strcmp(buf, "BLACKLIST_SHOW") == 0) {
 		reply_len = hostapd_ctrl_iface_blacklist_show(hapd, reply,
 						reply_size);
+		if(reply_len == 0) {
+			os_memcpy(reply, "EMPTY\n", 6);
+			reply_len = 6;
+		}
 	} else if (os_strcmp(buf, "BLACKLIST_CLR") == 0) {
 		if(hostapd_ctrl_iface_blacklist_clr(hapd))
 			reply_len = -1;
