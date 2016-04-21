@@ -291,6 +291,10 @@ static void hostapd_free_hapd_data(struct hostapd_data *hapd)
 	hapd->radius_das = NULL;
 #endif /* CONFIG_NO_RADIUS */
 
+#ifdef CONFIG_NET_STEERING
+	net_steering_deinit(hapd);
+#endif
+
 	hostapd_deinit_wps(hapd);
 
 	authsrv_deinit(hapd);

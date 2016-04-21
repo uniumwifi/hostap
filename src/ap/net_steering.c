@@ -3,6 +3,8 @@
 #include "utils/state_machine.h"
 #include "utils/common.h"
 #include "utils/wpa_debug.h"
+#include "utils/wpabuf.h"
+#include "utils/list.h"
 #include "common/defs.h"
 #include "sta_info.h"
 #include "l2_packet/l2_packet.h"
@@ -16,31 +18,109 @@
 // #include <linux/if_packet.h>
 
 #define MAX_FRAME_SIZE 1024
-#define TLV_MAGIC 32
-#define TLV_VERSION 1
-#define PROTO 0x8267
 
-struct net_steering_header {
-	u8 magic;
-	u8 version;
-	u16 counter;
-	u16 len;
-}__attribute__ ((packed));
+static u16 proto = 0x8267; // chosen at random from unassigned
+static u8 tlv_magic = 48;
+static u8 tlv_version = 1;
+
+#define TLV_SCORE 0
+//static const u8 tlv_close_client = 1;
+//static const u8 tlv_closed_client = 2;
+//static const u8 tlv_map = 4;
+//static const u8 tlv_client_flags = 5;
 
 // One context per bss
 // TODO: need to track list of peers
 struct net_steering_context {
-	struct net_steering_context* next;
+	struct dl_list list;
 	struct hostapd_data *hapd;
-	u16 frame_counter;              // count our frames TODO Maybe we don't need this
+	u16 frame_sn;
 	struct l2_packet_data *control; // the steering control channel
 };
 
-// crude linked-list to track contexts
-static struct net_steering_context *nsc_head;
+static struct dl_list nsc_list = DL_LIST_HEAD_INIT(nsc_list);
 
 static u8 one[ETH_ALEN] = { 0xe8, 0xde, 0x27, 0x6d, 0xcc, 0x5c };
 static u8 two[ETH_ALEN] = { 0xe8, 0xde, 0x27, 0x65, 0xe5, 0x1c };
+
+static void put_header(struct wpabuf* buf, u16 sn)
+{
+	wpabuf_put_u8(buf, tlv_magic);
+	wpabuf_put_u8(buf, tlv_version);
+	// initial length
+	wpabuf_put_be16(buf, 0);
+	wpabuf_put_be16(buf, htons(sn));
+}
+
+static void finalize(struct wpabuf* buf)
+{
+	*(wpabuf_mhead_u8(buf) + (sizeof(tlv_magic) + sizeof(tlv_version))) = (u16)(wpabuf_len(buf));
+}
+
+static size_t parse_header(const u8* buf, size_t len, u8* magic, u8* version, u16* packet_len, u16* sn)
+{
+	static u8 header_len = sizeof(u8) + sizeof(u8) + sizeof(*sn) + sizeof(u16);
+
+	if (len < header_len) return 0;
+
+	const u8* tmp = buf;
+	os_memcpy(magic, tmp, sizeof(*magic));
+	tmp += sizeof(*magic);
+
+	os_memcpy(version, tmp, sizeof(*version));
+	tmp += sizeof(*version);
+
+	os_memcpy(packet_len, tmp, sizeof(*packet_len));
+	*packet_len = ntohs(*packet_len);
+	tmp += sizeof(*packet_len);
+
+	os_memcpy(sn, tmp, sizeof(*sn));
+	*sn = ntohs(*sn);
+	tmp += sizeof(*sn);
+
+	return tmp - buf;
+}
+
+static size_t parse_tlv(const u8* buf, size_t len, u8* tlv_type, u8* tlv_len)
+{
+	const u8* tmp = buf;
+	if (len < (sizeof(*tlv_type) + sizeof(*tlv_len))) return 0;
+
+	os_memcpy(tlv_type, tmp, sizeof(*tlv_type));
+	tmp += sizeof(*tlv_type);
+
+	os_memcpy(tlv_len, tmp, sizeof(*tlv_len));
+	tmp += sizeof(*tlv_len);
+
+	return tmp - buf;
+}
+
+static void put_score(struct wpabuf* buf, u8* sta, u8* bssid, u16 score)
+{
+	static u8 len = ETH_ALEN + ETH_ALEN + sizeof(score);
+	wpabuf_put_u8(buf, TLV_SCORE);
+	wpabuf_put_u8(buf, len);
+	wpabuf_put_data(buf, sta, ETH_ALEN);
+	wpabuf_put_data(buf, bssid, ETH_ALEN);
+	wpabuf_put_be16(buf, htons(score));
+}
+
+static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* score)
+{
+	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(score);
+
+	if (len < score_len) return 0;
+
+	const u8* tmp = buf;
+	os_memcpy(sta, tmp, ETH_ALEN);
+	tmp += ETH_ALEN;
+	os_memcpy(bssid, tmp, ETH_ALEN);
+	tmp += ETH_ALEN;
+	os_memcpy(score, tmp, sizeof(*score));
+	*score = ntohs(*score);
+	tmp += sizeof(*score);
+	return tmp - buf;
+}
 
 struct net_steering_sm {
 
@@ -85,11 +165,20 @@ SM_STATE(STEERING, REJECTED) {
 	SM_ENTRY(STEERING, REJECTED);
 }
 
-static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len) {
-	struct net_steering_header* hdr;
+static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
+{
 	struct net_steering_context* nsc = ctx;
+	u16 sn = 0;
+	u8 magic, version, type_tlv, tlv_len = 0;
+	u16 packet_len = 0;
+	u16 score = 0;
+	u8 sta[ETH_ALEN];
+	u8 bssid[ETH_ALEN];
+	size_t num_read;
+	const u8* packet = buf;
 
-	if (len < sizeof(*hdr)) {
+	num_read = parse_header(packet, len, &magic, &version, &packet_len, &sn);
+	if (!num_read) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping short message from "MACSTR": %d bytes\n",
@@ -97,8 +186,7 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 		return;
 	}
 
-	hdr = (struct net_steering_header*) buf;
-	if (len < (sizeof(*hdr) + ntohs(hdr->len))) {
+	if (len < packet_len) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping short message from "MACSTR": %d bytes\n",
@@ -106,49 +194,68 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 		return;
 	}
 
-	if (TLV_VERSION != hdr->version || TLV_MAGIC != hdr->magic) {
+	if (tlv_version != version || tlv_magic != magic) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping invalid message from "MACSTR": magic %d version %d\n",
-				MAC2STR(src_addr), hdr->magic, hdr->version);
+				MAC2STR(src_addr),magic, version);
 		return;
+	}
+
+	// TODO handle more than one TLV per message
+	num_read = parse_tlv(packet, len-num_read, &type_tlv, &tlv_len);
+	if (!num_read) {
+		// TODO Warn and drop
+		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_DEBUG, "Could not parse tlv from "MACSTR"\n",
+				len, MAC2STR(src_addr));
+
+		return;
+	}
+
+	switch (type_tlv)
+	{
+	case TLV_SCORE:
+		num_read = parse_score(packet, len-num_read, sta, bssid, &score);
+		break;
+	default:
+		// TODO WARNING
+		break;
 	}
 
 	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "Received %d bytes from "MACSTR" : %d\n",
-			len, MAC2STR(src_addr), ntohs(hdr->counter));
+			len, MAC2STR(src_addr), ntohs(sn));
 
-}
-
-static struct net_steering_context* find_nsc_by_hapd(struct hostapd_data *hapd)
-{
-	struct net_steering_context* tmp = nsc_head;
-	while (tmp && tmp->hapd != hapd) tmp = tmp->next;
-	return tmp;
 }
 
 void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 {
-	u8 buf[MAX_FRAME_SIZE];
+	struct wpabuf *buf;
 	int ret = 0;
 	u8 *dst = NULL;
 	struct net_steering_context* nsc = NULL;
-	struct net_steering_header* hdr = (struct net_steering_header*) buf;
-	u16 proto = PROTO;
 	u8 own[ETH_ALEN];
+	u16 score = 0;
 
-	nsc = find_nsc_by_hapd(hapd);
+	dl_list_for_each(nsc, &nsc_list, struct net_steering_context, list) {
+		if (nsc->hapd == hapd) break;
+	}
+
 	if (!nsc) {
 		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "Association to unknown bss "MACSTR"\n",
-				MAC2STR(hapd->conf->bssid));
+			HOSTAPD_LEVEL_WARNING, "Association to unknown bss "MACSTR"\n",
+			MAC2STR(hapd->conf->bssid));
 		return;
 	}
 
-	hdr->magic = TLV_MAGIC;
-	hdr->version = TLV_VERSION;
-	hdr->counter = htons(nsc->frame_counter++);
-	hdr->len = 0; // TODO fix this when there is more than just header
+	// TODO compute score!
+	// TODO track the client, or is it already tracked in hapd somewhere?
+
+	buf = wpabuf_alloc(MAX_FRAME_SIZE);
+	put_header(buf, nsc->frame_sn++);
+	put_score(buf, sta->addr, nsc->hapd->conf->bssid, score);
+	finalize(buf);
 
 	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG, "net_steering_association - "MACSTR" associated to "MACSTR"\n",
@@ -157,47 +264,43 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	// TODO need to manage configuration of peer list
 	l2_packet_get_own_addr(nsc->control, own);
 	dst = (os_memcmp(own, one, ETH_ALEN) == 0) ? two : one;
-	ret = l2_packet_send(nsc->control, dst, proto, buf, sizeof(*hdr) + hdr->len);
+	ret = l2_packet_send(nsc->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
 	if (ret < 0) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG, "Failed l2 send to "MACSTR" : error %d\n",
 				MAC2STR(dst), ret);
 	}
+
+	wpabuf_free(buf);
 }
 
-static void free_context(struct net_steering_context *nsc)
+void net_steering_deinit(struct hostapd_data *hapd)
 {
-	struct net_steering_context* tmp = nsc_head;
+	struct net_steering_context* nsc;
+	struct net_steering_context* tmp;
 
-	while (tmp && tmp->next != nsc) tmp = tmp->next;
-	if (tmp) tmp->next = nsc->next;
-	else wpa_printf(MSG_DEBUG, "net_steering free_context - unknown context for %s", nsc->hapd->conf->iface);
-	os_memset(nsc, 0, sizeof(*nsc));
-	os_free(nsc);
-}
-
-void net_steering_deinit(struct net_steering_context *nsc)
-{
-
-	if (nsc->control != NULL) {
-		l2_packet_deinit(nsc->control);
-		wpa_printf(MSG_DEBUG, "net_steering_deinit - l2_packet_deinit");
+	dl_list_for_each_safe(nsc, tmp, &nsc_list, struct net_steering_context, list) {
+		if (nsc->hapd == hapd) {
+			if (nsc->control != NULL) {
+				l2_packet_deinit(nsc->control);
+				wpa_printf(MSG_DEBUG, "net_steering_deinit - l2_packet_deinit");
+			}
+			os_memset(nsc, 0, sizeof(*nsc));
+			os_free(nsc);
+			break;
+		}
 	}
-	free_context(nsc);
 }
 
 int net_steering_init(struct hostapd_data *hapd)
 {
-	struct net_steering_context* tmp = NULL;
-	struct net_steering_context* nsc = NULL;
+	struct net_steering_context* nsc = (struct net_steering_context*) os_zalloc(sizeof(*nsc));
 
-	u16 proto = PROTO;
+	if (!nsc) return -1;
 
-	nsc = (struct net_steering_context*) os_zalloc(sizeof(*nsc));
 	nsc->hapd = hapd;
-	nsc->control = NULL;
 
-	// TODO: what if there is no bridge in use?
+	// TODO: what if there is no bridge in use? use iface?
 	nsc->control = l2_packet_init(hapd->conf->bridge, NULL, proto, nsc_receive, nsc, 0);
 	if (nsc->control == NULL) {
 
@@ -205,22 +308,17 @@ int net_steering_init(struct hostapd_data *hapd)
 				HOSTAPD_LEVEL_DEBUG, "net_steering_init - l2_packet_init failed for %s with bssid "MACSTR"\n",
 				hapd->conf->bridge, MAC2STR(nsc->hapd->conf->bssid));
 
-		net_steering_deinit(nsc);
+		os_memset(nsc, 0, sizeof(*nsc));
+		os_free(nsc);
 		return -1;
 	}
+
+	// add the context to the end of the list
+	dl_list_add(&nsc_list, &nsc->list);
 
 	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "net_steering_init - ready on %s with bssid "MACSTR"\n",
 			hapd->conf->bridge, MAC2STR(nsc->hapd->conf->bssid));
-
-	if (!nsc_head) {
-		nsc_head = nsc;
-	}
-	else {
-		tmp = nsc_head;
-		while (tmp->next) tmp = tmp->next;
-		tmp->next = nsc;
-	}
 
 	return 0;
 }
