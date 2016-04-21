@@ -647,7 +647,8 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	struct wnm_neighbor_report_element report_ie;
 
 	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
-		   HOSTAPD_LEVEL_INFO, "WNM: wnm_send_ess_disassoc_move client " MACSTR " (disassoc_timer=%d) to AP "
+			HOSTAPD_LEVEL_INFO, "WNM: Send BSS Transition Management Request "
+		   "client "MACSTR" (disassoc_timer=%d) to AP "
 		   MACSTR, MAC2STR(sta->addr), disassoc_timer, MAC2STR(ap_addr));
 
 	os_memset(buf, 0, sizeof(buf));
