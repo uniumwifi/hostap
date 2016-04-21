@@ -629,12 +629,15 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	mgmt->u.action.u.bss_tm_req.action = WNM_BSS_TRANS_MGMT_REQ;
 	mgmt->u.action.u.bss_tm_req.dialog_token = 1;
 	mgmt->u.action.u.bss_tm_req.req_mode =
-		WNM_BSS_TM_REQ_DISASSOC_IMMINENT |
-		//WNM_BSS_TM_REQ_ESS_DISASSOC_IMMINENT |
+		WNM_BSS_TM_REQ_ABRIDGED |
 		WNM_BSS_TM_REQ_PREF_CAND_LIST_INCLUDED;
+	if(disassoc_timer > 0) {
+		mgmt->u.action.u.bss_tm_req.req_mode |=
+			WNM_BSS_TM_REQ_DISASSOC_IMMINENT;
 	mgmt->u.action.u.bss_tm_req.disassoc_timer =
 		host_to_le16(disassoc_timer);
-	mgmt->u.action.u.bss_tm_req.validity_interval = 100;
+	}
+	mgmt->u.action.u.bss_tm_req.validity_interval = 255;
 
 	pos = mgmt->u.action.u.bss_tm_req.variable;
 
@@ -656,6 +659,18 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 		report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
 		report_ie.len = report_ie_len - 2 + 3;
 		os_memcpy(report_ie.bssid, ap_addr, 6);
+		report_ie.operating_class = 12; // todo will need to fix for 5ghz or 20ht
+
+		// dot11RMNeighborReportPhyType OBJECT-TYPE
+		// SYNTAX INTEGER {
+		// fhss(1),
+		// dsss(2),
+		// irbaseband(3),
+		// ofdm(4),
+		// hrdsss(5),
+		// erp(6),
+		// ht(7) }
+		//report_ie.PHY_type =
 		report_ie.channel_number = ap_channel;
 
 		// The AP Reachability field indicates whether the AP identified by this BSSID is reachable by the STA that
