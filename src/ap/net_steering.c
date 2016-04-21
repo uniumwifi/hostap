@@ -632,68 +632,56 @@ SM_STATE(STEERING, REJECTED) { SM_ENTRY(STEERING, REJECTED); }
 
 SM_EVENT(STEERING, IDLE, E_ASSOCIATED, ASSOCIATED)
 {
-	// flood score
 	start_flood_timer(sm);
 }
 
 SM_EVENT(STEERING, IDLE, E_PEER_IS_WORSE, CONFIRMING)
 {
-	// send close client
 	flood_close_client(sm);
 }
 
 SM_EVENT(STEERING, IDLE, E_PEER_NOT_WORSE, REJECTED)
 {
-	// blacklist
 	do_client_blacklist_add(sm);
 	client_start_timer(sm);
 }
 
 SM_EVENT(STEERING, IDLE, E_CLOSE_CLIENT, REJECTED)
 {
-	// close client
 	flood_close_client(sm);
-	// blacklist
 	do_client_blacklist_add(sm);
 	client_start_timer(sm);
 }
 
 SM_EVENT(STEERING, CONFIRMING, E_PEER_IS_WORSE, CONFIRMING)
 {
-	// close client
 	flood_close_client(sm);
 }
 
 SM_EVENT(STEERING, CONFIRMING, E_PEER_NOT_WORSE, REJECTED)
 {
-	// blacklist
 	do_client_blacklist_add(sm);
 	client_start_timer(sm);
 }
 
 SM_EVENT(STEERING, CONFIRMING, E_ASSOCIATED, ASSOCIATED)
 {
-	// flood score
 	start_flood_timer(sm);
 }
 
 SM_EVENT(STEERING, ASSOCIATING, E_ASSOCIATED, ASSOCIATED)
 {
-	// flood score
 	start_flood_timer(sm);
 }
 
 SM_EVENT(STEERING, ASSOCIATING, E_PEER_IS_WORSE, ASSOCIATING)
 {
-	// close client
 	flood_close_client(sm);
 }
 
 SM_EVENT(STEERING, ASSOCIATING, E_CLOSE_CLIENT, REJECTED)
 {
-	// closed client
 	flood_closed_client(sm);
-	// blacklist
 	do_client_blacklist_add(sm);
 	client_start_timer(sm);
 }
@@ -701,31 +689,24 @@ SM_EVENT(STEERING, ASSOCIATING, E_CLOSE_CLIENT, REJECTED)
 
 SM_EVENT(STEERING, ASSOCIATED, E_CLOSE_CLIENT, REJECTING)
 {
-	// blacklist
 	do_client_blacklist_add(sm);
-	// disassociate
 	do_client_disassociate(sm);
-	// TODO clear remotes
 	client_start_timer(sm);
 	stop_flood_timer(sm);
 }
 
 SM_EVENT(STEERING, ASSOCIATED, E_DISASSOCIATED, IDLE)
 {
-	// stop flooding score
 	stop_flood_timer(sm);
-	// flood peer lost client
 }
 
 SM_EVENT(STEERING, ASSOCIATED, E_PEER_IS_WORSE, ASSOCIATED)
 {
-	// close client
 	flood_close_client(sm);
 }
 
 SM_EVENT(STEERING, REJECTING, E_DISASSOCIATED, REJECTED)
 {
-	// closed client
 	flood_closed_client(sm);
 	client_stop_timer(sm);
 	client_start_timer(sm);
@@ -733,38 +714,31 @@ SM_EVENT(STEERING, REJECTING, E_DISASSOCIATED, REJECTED)
 
 SM_EVENT(STEERING, REJECTING, E_PEER_IS_WORSE, CONFIRMING)
 {
-	// close client
 	flood_close_client(sm);
-	// unblacklist
 	do_client_blacklist_rm(sm);
 	client_stop_timer(sm);
 }
 
 SM_EVENT(STEERING, REJECTING, E_PEER_LOST_CLIENT, CONFIRMING)
 {
-	// unblacklist
 	do_client_blacklist_rm(sm);
 	client_stop_timer(sm);
 }
 
 SM_EVENT(STEERING, REJECTING, E_TIMEOUT, ASSOCIATING)
 {
-	// unblacklist
 	do_client_blacklist_rm(sm);
 	client_stop_timer(sm);
 }
 
 SM_EVENT(STEERING, REJECTED, E_PEER_IS_WORSE, CONFIRMING)
 {
-	// close client
 	flood_close_client(sm);
 	client_stop_timer(sm);
 }
 
 SM_EVENT(STEERING, REJECTED, E_PEER_LOST_CLIENT, CONFIRMING)
 {
-	// close client
-	// unblacklist
 	flood_close_client(sm);
 	do_client_blacklist_rm(sm);
 	client_stop_timer(sm);
@@ -772,13 +746,11 @@ SM_EVENT(STEERING, REJECTED, E_PEER_LOST_CLIENT, CONFIRMING)
 
 SM_EVENT(STEERING, REJECTED, E_CLOSE_CLIENT, REJECTED)
 {
-	// close client
 	flood_close_client(sm);
 }
 
 SM_EVENT(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING)
 {
-	// unblacklist
 	do_client_blacklist_rm(sm);
 	client_stop_timer(sm);
 }
@@ -997,7 +969,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 			buf_pos += num_read;
 
 			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-					HOSTAPD_LEVEL_DEBUG, MACSTR" - "MACSTR" says closed client "MACSTR"\n",
+					HOSTAPD_LEVEL_DEBUG, MACSTR" - "MACSTR" closed client "MACSTR"\n",
 					MAC2STR(src_addr), MAC2STR(target_bssid), MAC2STR(sta));
 
 			receive_closed_client(nsb, sta, target_bssid);
@@ -1109,6 +1081,8 @@ void net_steering_deinit(struct hostapd_data *hapd)
 			dl_list_for_each_safe(client, ctmp, &nsb->clients, struct net_steering_client, list) {
 				client_delete(client);
 			}
+
+			dl_list_del(&nsb->list);
 			os_memset(nsb, 0, sizeof(*nsb));
 			os_free(nsb);
 			break;
