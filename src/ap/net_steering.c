@@ -19,15 +19,15 @@
 
 #define MAX_FRAME_SIZE 1024
 
-static u16 proto = 0x8267; // chosen at random from unassigned
-static u8 tlv_magic = 48;
-static u8 tlv_version = 1;
+static const u16 proto = 0x8267; // chosen at random from unassigned
+static const u8 tlv_magic = 48;
+static const u8 tlv_version = 1;
 
 #define TLV_SCORE 0
-//static const u8 tlv_close_client = 1;
-//static const u8 tlv_closed_client = 2;
-//static const u8 tlv_map = 4;
-//static const u8 tlv_client_flags = 5;
+#define TLV_CLOSE_CLIENT = 1;
+#define TLV_CLOSED_CLIENT = 2;
+#define TLV_MAP = 4;
+#define TLV_CLIENT_FLAGS = 5;
 
 // One context per bss
 // TODO: need to track list of peers
@@ -45,21 +45,24 @@ static u8 two[ETH_ALEN] = { 0xe8, 0xde, 0x27, 0x65, 0xe5, 0x1c };
 
 static void put_header(struct wpabuf* buf, u16 sn)
 {
+	u16 len = 0;
 	wpabuf_put_u8(buf, tlv_magic);
 	wpabuf_put_u8(buf, tlv_version);
-	// initial length
-	wpabuf_put_be16(buf, 0);
-	wpabuf_put_be16(buf, htons(sn));
+	wpabuf_put_data(buf, &len, sizeof(len));
+	sn = htons(sn);
+	wpabuf_put_data(buf, &sn, sizeof(sn));
 }
 
-static void finalize(struct wpabuf* buf)
+// write the total length into the header
+static void finalize_header(struct wpabuf* buf)
 {
-	*(wpabuf_mhead_u8(buf) + (sizeof(tlv_magic) + sizeof(tlv_version))) = (u16)(wpabuf_len(buf));
+	u16* p = (u16*)(wpabuf_mhead_u8(buf) + (sizeof(tlv_magic) + sizeof(tlv_version)));
+	*p = htons(wpabuf_len(buf));
 }
 
 static size_t parse_header(const u8* buf, size_t len, u8* magic, u8* version, u16* packet_len, u16* sn)
 {
-	static u8 header_len = sizeof(u8) + sizeof(u8) + sizeof(*sn) + sizeof(u16);
+	static u16 header_len = sizeof(*magic) + sizeof(*version) + sizeof(*sn) + sizeof(*packet_len);
 
 	if (len < header_len) return 0;
 
@@ -81,10 +84,17 @@ static size_t parse_header(const u8* buf, size_t len, u8* magic, u8* version, u1
 	return tmp - buf;
 }
 
-static size_t parse_tlv(const u8* buf, size_t len, u8* tlv_type, u8* tlv_len)
+static void put_tlv_header(struct wpabuf* buf, u8 tlv_type, u8 tlv_len)
 {
+	wpabuf_put_u8(buf, tlv_type);
+	wpabuf_put_u8(buf, tlv_len);
+}
+
+static size_t parse_tlv_header(const u8* buf, size_t len, u8* tlv_type, u8* tlv_len)
+{
+	static const header_len = sizeof(*tlv_type) + sizeof(*tlv_len);
 	const u8* tmp = buf;
-	if (len < (sizeof(*tlv_type) + sizeof(*tlv_len))) return 0;
+	if (len < header_len) return 0;
 
 	os_memcpy(tlv_type, tmp, sizeof(*tlv_type));
 	tmp += sizeof(*tlv_type);
@@ -97,17 +107,18 @@ static size_t parse_tlv(const u8* buf, size_t len, u8* tlv_type, u8* tlv_len)
 
 static void put_score(struct wpabuf* buf, u8* sta, u8* bssid, u16 score)
 {
-	static u8 len = ETH_ALEN + ETH_ALEN + sizeof(score);
-	wpabuf_put_u8(buf, TLV_SCORE);
-	wpabuf_put_u8(buf, len);
+	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(score);
+
+	put_tlv_header(buf, TLV_SCORE, score_len);
 	wpabuf_put_data(buf, sta, ETH_ALEN);
 	wpabuf_put_data(buf, bssid, ETH_ALEN);
-	wpabuf_put_be16(buf, htons(score));
+	score = htons(score);
+	wpabuf_put_data(buf, &score, sizeof(score));
 }
 
 static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* score)
 {
-	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(score);
+	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(*score);
 
 	if (len < score_len) return 0;
 
@@ -174,10 +185,11 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 	u16 score = 0;
 	u8 sta[ETH_ALEN];
 	u8 bssid[ETH_ALEN];
-	size_t num_read;
-	const u8* packet = buf;
+	size_t num_read = 0;
 
-	num_read = parse_header(packet, len, &magic, &version, &packet_len, &sn);
+	const u8* buf_pos = buf;
+
+	num_read = parse_header(buf_pos, len, &magic, &version, &packet_len, &sn);
 	if (!num_read) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
@@ -189,8 +201,8 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 	if (len < packet_len) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
-				"Dropping short message from "MACSTR": %d bytes\n",
-				MAC2STR(src_addr), len);
+				"Dropping short message from "MACSTR": recv %d bytes, expected %d\n",
+				MAC2STR(src_addr), len, packet_len);
 		return;
 	}
 
@@ -198,35 +210,46 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping invalid message from "MACSTR": magic %d version %d\n",
-				MAC2STR(src_addr),magic, version);
+				MAC2STR(src_addr), magic, version);
 		return;
 	}
+	buf_pos += num_read;
 
-	// TODO handle more than one TLV per message
-	num_read = parse_tlv(packet, len-num_read, &type_tlv, &tlv_len);
-	if (!num_read) {
-		// TODO Warn and drop
-		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_DEBUG, "Could not parse tlv from "MACSTR"\n",
-				len, MAC2STR(src_addr));
+	while (buf_pos < buf + packet_len) {
+		num_read = parse_tlv_header(buf_pos, packet_len-(buf_pos-buf), &type_tlv, &tlv_len);
+		if (!num_read) {
+			hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+					HOSTAPD_LEVEL_DEBUG, "Could not parse tlv header from "MACSTR"\n",
+					len, MAC2STR(src_addr));
+			return;
+		}
+		buf_pos += num_read;
 
-		return;
-	}
+		switch (type_tlv)
+		{
+		case TLV_SCORE:
+			num_read = parse_score(buf_pos, tlv_len, sta, bssid, &score);
+			if (!num_read) {
+				hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+						HOSTAPD_LEVEL_DEBUG, "Could not parse score from "MACSTR"\n",
+						len, MAC2STR(src_addr));
+				return;
+			}
+			buf_pos += num_read;
 
-	switch (type_tlv)
-	{
-	case TLV_SCORE:
-		num_read = parse_score(packet, len-num_read, sta, bssid, &score);
-		break;
-	default:
-		// TODO WARNING
-		break;
+			break;
+		default:
+			// skip unknown tlvs
+			buf_pos += tlv_len;
+
+			// TODO WARNING
+			break;
+		}
 	}
 
 	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "Received %d bytes from "MACSTR" : %d\n",
 			len, MAC2STR(src_addr), ntohs(sn));
-
 }
 
 void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
@@ -255,7 +278,10 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	buf = wpabuf_alloc(MAX_FRAME_SIZE);
 	put_header(buf, nsc->frame_sn++);
 	put_score(buf, sta->addr, nsc->hapd->conf->bssid, score);
-	finalize(buf);
+	// TODO remove this extra score put here as test
+	score = 10;
+	put_score(buf, sta->addr, nsc->hapd->conf->bssid, score);
+	finalize_header(buf);
 
 	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG, "net_steering_association - "MACSTR" associated to "MACSTR"\n",
@@ -264,6 +290,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	// TODO need to manage configuration of peer list
 	l2_packet_get_own_addr(nsc->control, own);
 	dst = (os_memcmp(own, one, ETH_ALEN) == 0) ? two : one;
+
 	ret = l2_packet_send(nsc->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
 	if (ret < 0) {
 		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
