@@ -1078,7 +1078,7 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 #endif /* CONFIG_INTERWORKING */
 
 #ifdef CONFIG_NET_STEERING
-	if (!net_steering_init(hapd, conf->steering_iface)) {
+	if (net_steering_init(hapd) < 0) {
 		wpa_printf(MSG_ERROR, "Failed to initialize net steering");
 		return -1;
 	}

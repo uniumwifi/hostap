@@ -2016,7 +2016,7 @@ static void handle_assoc(struct hostapd_data *hapd,
 #endif /* CONFIG_CLIENT_TAXONOMY */
 
 #ifdef CONFIG_NET_STEERING
-	net_steering_association(sta);
+	net_steering_association(hapd, sta);
 #endif  /* CONFIG_NET_STEERING */
 
  fail:
