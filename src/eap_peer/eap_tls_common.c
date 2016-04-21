@@ -157,6 +157,10 @@ static int eap_tls_params_from_conf(struct eap_sm *sm,
 			params->flags |= TLS_CONN_EAP_FAST;
 	}
 
+	// crbug.com/605310 - temporarily disable TLSv1.1 and TLSv1.2 until
+	// they can be controlled via policy.
+	params->flags |= TLS_CONN_DISABLE_TLSv1_1 | TLS_CONN_DISABLE_TLSv1_2;
+
 	/*
 	 * Use blob data, if available. Otherwise, leave reference to external
 	 * file as-is.
