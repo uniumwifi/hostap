@@ -18,9 +18,15 @@
 #include "ap/ap_config.h"
 #include "ap/ap_drv_ops.h"
 #include "ap/wpa_auth.h"
+#include "ap/wpa_auth_i.h"
+#include "radius/radius.h"
+#include "ap/accounting.h"
+#include "ap/ap_mlme.h"
+#include "ap/ieee802_1x.h"
 #include "wnm_ap.h"
 
 #define MAX_TFS_IE_LEN  1024
+#define WNM_DEAUTH_DELAY_USEC 10
 
 
 /* get the TFS IE from driver */
@@ -335,6 +341,7 @@ static void ieee802_11_rx_bss_trans_mgmt_resp(struct hostapd_data *hapd,
 {
 	u8 dialog_token, status_code, bss_termination_delay;
 	const u8 *pos, *end;
+	struct sta_info *sta;
 
 	if (len < 3) {
 		wpa_printf(MSG_DEBUG, "WNM: Ignore too short BSS Transition Management Response from "
@@ -365,6 +372,31 @@ static void ieee802_11_rx_bss_trans_mgmt_resp(struct hostapd_data *hapd,
 			MACSTR,
 			MAC2STR(addr), status_code, bss_termination_delay,
 			MAC2STR(pos));
+
+		sta = ap_get_sta(hapd, addr);
+		if (sta == NULL) {
+			hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+				HOSTAPD_LEVEL_WARNING, "sta "MACSTR" not found for BSS transition response",
+				MAC2STR(addr));
+			return;
+		}
+
+		ap_sta_set_authorized(hapd, sta, 0);
+		sta->flags &= ~WLAN_STA_ASSOC;
+		wpa_auth_sm_event(sta->wpa_sm, WPA_DISASSOC);
+		ieee802_1x_notify_port_enabled(sta->eapol_sm, 0);
+		sta->acct_terminate_cause = RADIUS_ACCT_TERMINATE_CAUSE_USER_REQUEST;
+		accounting_sta_stop(hapd, sta);
+		ieee802_1x_free_station(sta);
+
+		hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+					   HOSTAPD_LEVEL_INFO, "WNM: disassociated due to accepted BSS transition request");
+
+		sta->timeout_next = STA_DEAUTH;
+		eloop_cancel_timeout(ap_handle_timer, hapd, sta);
+		eloop_register_timeout(0, WNM_DEAUTH_DELAY_USEC, ap_handle_timer, hapd, sta);
+		mlme_disassociate_indication(hapd, sta, WLAN_REASON_DISASSOC_STA_HAS_LEFT);
+
 		pos += ETH_ALEN;
 	} else {
 		wpa_msg(hapd->msg_ctx, MSG_INFO, BSS_TM_RESP MACSTR
@@ -611,6 +643,7 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	u8 buf[1000], *pos;
 	struct ieee80211_mgmt *mgmt;
 	u8 report_ie_len;
+	u8 op_class, channel;
 	struct wnm_neighbor_report_element report_ie;
 
 	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
@@ -658,7 +691,12 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
 	report_ie.len = report_ie_len - 2 + 3;
 	os_memcpy(report_ie.bssid, ap_addr, 6);
-	report_ie.operating_class = 12; // todo will need to fix for 5ghz or 20ht
+
+	if (ieee80211_freq_to_channel_ext(hapd->iface->freq,
+						  hapd->iconf->secondary_channel,
+						  hapd->iconf->vht_oper_chwidth,
+						  &op_class, &channel) != NUM_HOSTAPD_MODES)
+		report_ie.operating_class = op_class;
 
 	// dot11RMNeighborReportPhyType OBJECT-TYPE
 	// SYNTAX INTEGER {
@@ -700,7 +738,7 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	}
 
 	/* send disassociation frame after time-out */
-	if (disassoc_timer) {
+	if (disassoc_timer > 0) {
 		int timeout, beacon_int;
 
 		/*
