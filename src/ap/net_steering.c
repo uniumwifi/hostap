@@ -1111,11 +1111,20 @@ void net_steering_deinit(struct hostapd_data *hapd)
 
 int net_steering_init(struct hostapd_data *hapd)
 {
+	struct net_steering_bss* nsb = NULL;
+
 	/* see if there is any configuration */
 	if (!hapd->conf->net_steeering_mode) return 0;
 	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) return 0;
+	// We piggy-back on 802.11R configuration, and use that config to identify our peer APs
+	if (!hapd->conf->r0kh_list) {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "no FT peers configured on bssid "MACSTR"\n",
+				MAC2STR(nsb->hapd->conf->bssid));
+		return 0;
+	}
 
-	struct net_steering_bss* nsb = (struct net_steering_bss*) os_zalloc(sizeof(*nsb));
+	nsb = (struct net_steering_bss*) os_zalloc(sizeof(*nsb));
 
 	if (!nsb) return -1;
 
@@ -1147,14 +1156,6 @@ int net_steering_init(struct hostapd_data *hapd)
 	else if (os_strcmp(hapd->conf->net_steeering_mode, mode_force) == 0) nsb->mode = MODE_FORCE;
 	else nsb->mode = MODE_FORCE;
 
-	// TODO maybe we should not track bss that don't have peer configs, ie
-	// just exit.
-	// We piggy-back on 802.11R configuration, and use that config to identify our peer APs
-	if (!nsb->hapd->conf->r0kh_list) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "no FT peers configured on bssid "MACSTR"\n",
-				MAC2STR(nsb->hapd->conf->bssid));
-	}
 	return 0;
 }
 
