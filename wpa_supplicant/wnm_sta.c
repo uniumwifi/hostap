@@ -593,7 +593,7 @@ static void wnm_send_bss_transition_mgmt_resp(
 }
 
 
-int wnm_scan_process(struct wpa_supplicant *wpa_s, int reply_on_fail)
+int wnm_scan_process(struct wpa_supplicant *wpa_s)
 {
 	struct wpa_bss *bss;
 	struct wpa_ssid *ssid = wpa_s->current_ssid;
@@ -646,8 +646,6 @@ int wnm_scan_process(struct wpa_supplicant *wpa_s, int reply_on_fail)
 	return 1;
 
 send_bss_resp_fail:
-	if (!reply_on_fail)
-		return 0;
 
 	/* Send reject response for all the failures */
 
@@ -662,6 +660,9 @@ send_bss_resp_fail:
 	return 0;
 }
 
+int wnm_scan_process_cb(struct wpa_supplicant *wpa_s, struct wpa_scan_results *scan_res){
+	return wnm_scan_process(wpa_s);
+}
 
 static int cand_pref_compar(const void *a, const void *b)
 {
@@ -902,13 +903,14 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 			if (!os_reltime_expired(&now, &wpa_s->last_scan, 10)) {
 				wpa_printf(MSG_DEBUG,
 					   "WNM: Try to use recent scan results");
-				if (wnm_scan_process(wpa_s, 0) > 0)
+				if (wnm_scan_process(wpa_s) > 0)
 					return;
 				wpa_printf(MSG_DEBUG,
 					   "WNM: No match in previous scan results - try a new scan");
 			}
 		}
 
+		wpa_s->scan_res_handler = wnm_scan_process_cb;
 		wnm_set_scan_freqs(wpa_s);
 		wpa_supplicant_req_scan(wpa_s, 0, 0);
 	} else if (reply) {
