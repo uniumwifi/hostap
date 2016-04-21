@@ -424,7 +424,7 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 		u16 score = compute_score(ssi_signal);
 
 		if (score != client->score) {
-			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, MACSTR" score is now %d\n",
 			MAC2STR(client_get_mac(client)), score);
 		}
@@ -611,7 +611,7 @@ static void sm_ ## machine ## _ ## fromstate ## _on_ ## e_event ## _ ## tostate(
 /* TODO maybe use a switch, but that would take a more complex set of macros */
 #define SM_TRANSITION(machine, fromstate, e_event, tostate) \
 	if (sm->machine ## _state == machine ## _ ## fromstate && event == machine ## _ ## e_event) { \
-		hostapd_logger(sm->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING, \
+		hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING, \
 		HOSTAPD_LEVEL_DEBUG, "Client "MACSTR" transition %s %s %s\n",\
 		MAC2STR(client_get_mac(sm)), state_to_str(sm->machine ## _state), \
 		event_to_str(machine ## _ ## e_event), state_to_str(machine ## _ ## tostate)); \
@@ -622,7 +622,7 @@ static void sm_ ## machine ## _ ## fromstate ## _on_ ## e_event ## _ ## tostate(
 
 #define SM_TRANS_NOOP(machine, fromstate, e_event, tostate) \
 	if (sm->machine ## _state == machine ## _ ## fromstate && event == machine ## _ ## e_event) { \
-		hostapd_logger(sm->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING, \
+		hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING, \
 		HOSTAPD_LEVEL_DEBUG, "Client "MACSTR" noop transition %s %s %s\n",\
 		MAC2STR(client_get_mac(sm)), state_to_str(sm->machine ## _state), \
 		event_to_str(machine ## _ ## e_event), state_to_str(machine ## _ ## tostate)); \
@@ -808,7 +808,7 @@ SM_STEP_EVENT(STEERING)
 	SM_TRANSITION(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING);
 
 	/* By design, the default response is no state change */
-	hostapd_logger(sm->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 		HOSTAPD_LEVEL_DEBUG,
 		"Client "MACSTR" default handler for %s - %s\n",
 		MAC2STR(sm->addr), state_to_str(sm->STEERING_state), event_to_str(event));
@@ -955,9 +955,9 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 			}
 			buf_pos += num_read;
 
-			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-					HOSTAPD_LEVEL_DEBUG, "Received score from "MACSTR" %d\n",
-					MAC2STR(src_addr), score);
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+					HOSTAPD_LEVEL_DEBUG, "Received score from "MACSTR" for "MACSTR" %d\n",
+					MAC2STR(bssid), MAC2STR(sta), score);
 
 			receive_score(nsb, sta, bssid, score);
 			break;
@@ -971,9 +971,9 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 			}
 			buf_pos += num_read;
 
-			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-					HOSTAPD_LEVEL_DEBUG, MACSTR" - "MACSTR" says "MACSTR" should close client "MACSTR"\n",
-					MAC2STR(src_addr), MAC2STR(bssid), MAC2STR(target_bssid), MAC2STR(sta));
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+					HOSTAPD_LEVEL_DEBUG, MACSTR" says "MACSTR" should close client "MACSTR"\n",
+					MAC2STR(bssid), MAC2STR(target_bssid), MAC2STR(sta));
 
 			receive_close_client(nsb, sta, bssid, target_bssid, ap_channel);
 			break;
@@ -987,9 +987,9 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 			}
 			buf_pos += num_read;
 
-			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-					HOSTAPD_LEVEL_DEBUG, MACSTR" - "MACSTR" closed client "MACSTR"\n",
-					MAC2STR(src_addr), MAC2STR(target_bssid), MAC2STR(sta));
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+					HOSTAPD_LEVEL_DEBUG, MACSTR" closed client "MACSTR"\n",
+					MAC2STR(target_bssid), MAC2STR(sta));
 
 			receive_closed_client(nsb, sta, target_bssid);
 			break;
@@ -1020,7 +1020,7 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 	}
 
 	if (!nsb) {
-		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_WARNING, "Association to unknown bss "MACSTR"\n",
 			MAC2STR(hapd->conf->bssid));
 		return;
@@ -1030,7 +1030,7 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 	dl_list_for_each_safe(client, ctmp, &nsb->clients, struct net_steering_client, list) {
 		if (os_memcmp(client_get_mac(client), sta->addr, ETH_ALEN) == 0) {
 
-			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 						HOSTAPD_LEVEL_INFO, MACSTR" disassociated from "MACSTR"\n",
 						MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid));
 
@@ -1051,18 +1051,18 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	}
 
 	if (!nsb) {
-		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_WARNING, "Association to unknown bss "MACSTR"\n",
 			MAC2STR(hapd->conf->bssid));
 		return;
 	}
 
-	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_INFO, MACSTR" associated to "MACSTR"\n",
 				MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid));
 
 	if (sta->dot11MgmtOptionBSSTransitionActivated) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "Client "MACSTR" supports Fast BSS transition\n",
 			MAC2STR(sta->addr));
 	}
@@ -1072,7 +1072,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	{
 		client = client_create(nsb, sta->addr);
 		if (!client) {
-			hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "Failed to create client "MACSTR" on bssid "MACSTR"\n",
 				MAC2STR(sta), MAC2STR(hapd->conf->bssid));
 
@@ -1118,7 +1118,7 @@ int net_steering_init(struct hostapd_data *hapd)
 	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) return 0;
 	// We piggy-back on 802.11R configuration, and use that config to identify our peer APs
 	if (!hapd->conf->r0kh_list) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "no FT peers configured on bssid "MACSTR"\n",
 				MAC2STR(nsb->hapd->conf->bssid));
 		return 0;
@@ -1131,7 +1131,7 @@ int net_steering_init(struct hostapd_data *hapd)
 	// TODO: what if there is no bridge in use? use iface?
 	nsb->control = l2_packet_init(hapd->conf->bridge, NULL, proto, receive, nsb, 0);
 	if (nsb->control == NULL) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "net_steering_init - l2_packet_init failed for %s with bssid "MACSTR"\n",
 				hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid));
 
@@ -1147,7 +1147,7 @@ int net_steering_init(struct hostapd_data *hapd)
 	dl_list_add(&nsb_list, &nsb->list);
 	hostapd_register_probereq_cb(hapd, probe_req_cb, nsb);
 
-	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_INFO, "ready on %s with bssid "MACSTR" own addr "MACSTR": mode: %s\n",
 			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid), MAC2STR(nsb->hapd->own_addr),
 			hapd->conf->net_steeering_mode);
