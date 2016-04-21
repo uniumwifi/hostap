@@ -10,6 +10,7 @@
 #include "ap_config.h"
 #include "sta_blacklist.h"
 #include "sta_info.h"
+#include "wpa_auth.h"
 #include "common/defs.h"
 #include "l2_packet/l2_packet.h"
 
@@ -204,8 +205,8 @@ static void flood_score(void *eloop_data, void *user_ctx);
 
 static void start_flood_timer(struct net_steering_client *client)
 {
-	if (!eloop_register_timeout(FLOOD_TIMEOUT, 0, flood_score, client, NULL)) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	if (eloop_register_timeout(FLOOD_TIMEOUT, 0, flood_score, client, NULL)) {
+		hostapd_logger(client->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule flood\n",
 				MAC2STR(client->sta->addr));
 	}
@@ -216,26 +217,35 @@ static void flood_score(void *eloop_data, void *user_ctx)
 	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
+	struct ft_remote_r0kh *r0kh = nsb->hapd->conf->r0kh_list;
 	int ret;
-	u8 own[ETH_ALEN];
-	u8 *dst = NULL;
 
 	// TODO pick a better encoding?
 	u16 score = abs(client->rssi);
+
 	buf = wpabuf_alloc(MAX_FRAME_SIZE);
 	put_header(buf, nsb->frame_sn++);
 	put_score(buf, client->sta->addr, nsb->hapd->conf->bssid, score);
 	finalize_header(buf);
 
-	// TODO need to manage configuration of peer list
-	l2_packet_get_own_addr(nsb->control, own);
-	dst = (os_memcmp(own, one, ETH_ALEN) == 0) ? two : one;
+	while (r0kh) {
+		u8* dst = r0kh->addr;
 
-	ret = l2_packet_send(nsb->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
-	if (ret < 0) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		// don't send to ourself
+		if (os_memcmp(dst, nsb->hapd->own_addr, ETH_ALEN) != 0) {
+
+			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_DEBUG, "Flooding from "MACSTR" to "MACSTR"\n",
+			MAC2STR(nsb->hapd->own_addr), MAC2STR(dst));
+
+			ret = l2_packet_send(nsb->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
+			if (ret < 0) {
+				hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "Failed flood to "MACSTR" : error %d\n",
 				MAC2STR(dst), ret);
+			}
+		}
+		r0kh = r0kh->next;
 	}
 
 	wpabuf_free(buf);
@@ -253,8 +263,8 @@ static void client_timeout(void *eloop_data, void *user_ctx)
 
 static void start_timeout_timer(struct net_steering_client *client)
 {
-	if (!eloop_register_timeout(FLOOD_TIMEOUT, 0, client_timeout, client, NULL)) {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	if (eloop_register_timeout(FLOOD_TIMEOUT, 0, client_timeout, client, NULL)) {
+		hostapd_logger(client->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule timeout\n",
 				MAC2STR(client->sta->addr));
 	}
@@ -520,6 +530,8 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 static void net_steering_del_client(struct net_steering_client* client)
 {
 	eloop_cancel_timeout(flood_score, client, NULL);
+	eloop_cancel_timeout(client_timeout, client, NULL);
+
 	dl_list_del(&client->list);
 	os_memset(client, 0, sizeof(*client));
 	os_free(client);
@@ -626,7 +638,6 @@ int net_steering_init(struct hostapd_data *hapd)
 	// TODO: what if there is no bridge in use? use iface?
 	nsb->control = l2_packet_init(hapd->conf->bridge, NULL, proto, nsc_receive, nsb, 0);
 	if (nsb->control == NULL) {
-
 		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG, "net_steering_init - l2_packet_init failed for %s with bssid "MACSTR"\n",
 				hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid));
@@ -644,9 +655,15 @@ int net_steering_init(struct hostapd_data *hapd)
 	hostapd_register_probereq_cb(hapd, probe_req_cb, nsb);
 
 	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, "net_steering_init - ready on %s with bssid "MACSTR"\n",
-			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid));
+			HOSTAPD_LEVEL_DEBUG, "net_steering_init - ready on %s with bssid "MACSTR" own addr "MACSTR"\n",
+			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid), MAC2STR(nsb->hapd->own_addr));
 
+	// We piggy-back on R configuration, and use that config to identify our peer APs
+	if (!nsb->hapd->conf->r0kh_list) {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "net_steering_init - no FT peers configured on bssid "MACSTR"\n",
+				MAC2STR(nsb->hapd->conf->bssid));
+	}
 	return 0;
 }
 
