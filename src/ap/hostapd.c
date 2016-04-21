@@ -1077,6 +1077,13 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 	}
 #endif /* CONFIG_INTERWORKING */
 
+#ifdef CONFIG_NET_STEERING
+	if (!net_steering_init(hapd, conf->steering_iface)) {
+		wpa_printf(MSG_ERROR, "Failed to initialize net steering");
+		return -1;
+	}
+#endif /* CONFIG_NET_STEERING */
+
 	if (conf->bss_load_update_period && bss_load_update_init(hapd)) {
 		wpa_printf(MSG_ERROR, "BSS Load initialization failed");
 		return -1;

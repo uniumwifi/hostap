@@ -63,7 +63,7 @@ OBJS += ../src/ap/pmksa_cache_auth.o
 OBJS += ../src/ap/ieee802_11_shared.o
 OBJS += ../src/ap/beacon.o
 OBJS += ../src/ap/bss_load.o
-OBJS += ../src/ap/sta_blacklist.o
+OBJS += ../src/ap/sta_blacklist.o 
 
 OBJS_c = hostapd_cli.o ../src/common/wpa_ctrl.o ../src/utils/os_$(CONFIG_OS).o
 
@@ -74,6 +74,11 @@ NEED_SHA1=y
 
 OBJS += ../src/drivers/drivers.o
 CFLAGS += -DHOSTAPD
+
+ifdef CONFIG_NET_STEERING
+CFLAGS += -DCONFIG_NET_STEERING
+OBJS += ../src/ap/net_steering.o
+endif
 
 ifdef CONFIG_MODULE_TESTS
 CFLAGS += -DCONFIG_MODULE_TESTS

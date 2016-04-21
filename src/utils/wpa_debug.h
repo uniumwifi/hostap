@@ -304,6 +304,7 @@ void hostapd_logger_register_cb(hostapd_logger_cb_func func);
 #define HOSTAPD_MODULE_DRIVER		0x00000010
 #define HOSTAPD_MODULE_IAPP		0x00000020
 #define HOSTAPD_MODULE_MLME		0x00000040
+#define HOSTPAD_MODULE_NET_STEERING 0x00000080
 
 enum hostapd_logger_level {
 	HOSTAPD_LEVEL_DEBUG_VERBOSE = 0,

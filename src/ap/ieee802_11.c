@@ -48,6 +48,10 @@
 #include "taxonomy.h"
 #endif /* CONFIG_CLIENT_TAXONOMY */
 
+#ifdef CONFIG_NET_STEERING
+#include "net_steering.h"
+#endif /* CONFIG_NET_STEERING */
+
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
 {
@@ -2010,6 +2014,10 @@ static void handle_assoc(struct hostapd_data *hapd,
 #ifdef CONFIG_CLIENT_TAXONOMY
 	hostapd_taxonomy_assoc_req(hapd, sta, pos, left);
 #endif /* CONFIG_CLIENT_TAXONOMY */
+
+#ifdef CONFIG_NET_STEERING
+	net_steering_association(sta);
+#endif  /* CONFIG_NET_STEERING */
 
  fail:
 	send_assoc_resp(hapd, sta, resp, reassoc, pos, left);
