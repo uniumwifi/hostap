@@ -546,10 +546,6 @@ struct hostapd_bss_config {
 	char *dump_msk_file;
 #endif /* CONFIG_RADIUS_TEST */
 
-#ifdef CONFIG_NET_STEERING
-	char steering_iface[IFNAMSIZ + 1]; /* Interface used to coordinate the steering function */
-#endif /* CONFIG_NET_STEERING */
-
 	struct wpabuf *vendor_elements;
 
 	unsigned int sae_anti_clogging_threshold;

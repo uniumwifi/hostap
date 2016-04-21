@@ -5,11 +5,13 @@
 #include "utils/wpa_debug.h"
 #include "utils/wpabuf.h"
 #include "utils/list.h"
-#include "common/defs.h"
-#include "sta_info.h"
-#include "l2_packet/l2_packet.h"
+#include "utils/eloop.h"
 #include "hostapd.h"
 #include "ap_config.h"
+#include "sta_blacklist.h"
+#include "sta_info.h"
+#include "common/defs.h"
+#include "l2_packet/l2_packet.h"
 
 #include <sys/ioctl.h>
 
@@ -24,21 +26,66 @@ static const u8 tlv_magic = 48;
 static const u8 tlv_version = 1;
 
 #define TLV_SCORE 0
-#define TLV_CLOSE_CLIENT = 1;
-#define TLV_CLOSED_CLIENT = 2;
-#define TLV_MAP = 4;
-#define TLV_CLIENT_FLAGS = 5;
+#define TLV_CLOSE_CLIENT 1
+#define TLV_CLOSED_CLIENT 2
+#define TLV_MAP 4
+#define TLV_CLIENT_FLAGS 5
+
+#define FLOOD_TIMEOUT 1
+
+struct net_steering_client;
+struct net_steering_bss;
+
+struct net_steering_sm {
+
+	enum {
+		STEERING_IDLE,        // AP will allow the client to associate with it.
+		STEERING_CONFIRMING,  // AP has told another AP to blacklist the client and is waiting for it to tell us that it has blacklisted the client.
+		STEERING_ASSOCIATING, // A remote AP has confirmed that it has blacklisted the client; AP is now waiting on an associate.
+		STEERING_ASSOCIATED,  // The client is using this AP to communicate with other devices.
+		STEERING_REJECTING,   // The AP has blacklisted the client is waiting on a disassociate and will then send out a closed packet to remotes.
+		STEERING_REJECTED,    // The client is blacklisted and disassociated.
+	} STEERING_state;
+
+	enum {
+		STEERING_E_ASSOCIATED,
+		STEERING_E_DISASSOCIATED,
+		STEERING_E_PEER_IS_WORSE,
+		STEERING_E_PEER_NOT_WORSE,
+		STEERING_E_PEER_LOST_CLIENT,
+		STEERING_E_CLOSE_CLIENT,
+		STEERING_E_CLOSED_CLIENT,
+		STEERING_E_TIMEOUT,
+	} STEERING_event;
+
+	unsigned int changed;
+	u8 addr[ETH_ALEN];
+	struct net_steering_client* client;
+};
+
+
+// Use this so we can track additional data for stas and avoid adding more members to sta_info
+// It does mean that we need to be concerned about the lifetime of sta_info objects tracked
+// by hapd
+struct net_steering_client
+{
+	struct dl_list list;
+	struct net_steering_sm sm;
+	struct sta_info* sta;           // This will point to a sta in the hapd list pointed to by the nsb.
+	struct net_steering_bss* nsb;
+	int rssi;
+};
 
 // One context per bss
-// TODO: need to track list of peers
-struct net_steering_context {
-	struct dl_list list;
+struct net_steering_bss {
+	struct dl_list list;        // supports a dl_list of net_steering_bss
+	struct dl_list clients;     // contains the list of associated clients
 	struct hostapd_data *hapd;
 	u16 frame_sn;
 	struct l2_packet_data *control; // the steering control channel
 };
 
-static struct dl_list nsc_list = DL_LIST_HEAD_INIT(nsc_list);
+static struct dl_list nsb_list = DL_LIST_HEAD_INIT(nsb_list);
 
 static u8 one[ETH_ALEN] = { 0xe8, 0xde, 0x27, 0x6d, 0xcc, 0x5c };
 static u8 two[ETH_ALEN] = { 0xe8, 0xde, 0x27, 0x65, 0xe5, 0x1c };
@@ -133,52 +180,270 @@ static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* sc
 	return tmp - buf;
 }
 
-struct net_steering_sm {
+int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
+		   const u8 *ie, size_t ie_len, int ssi_signal)
+{
+	struct net_steering_bss* nsb = ctx;
+	struct hostapd_data *hapd = nsb->hapd;
+	struct net_steering_client *client = NULL;
 
-	enum {
-		STEERING_IDLE,        // AP will allow the client to associate with it.
-		STEERING_CONFIRMING,  // AP has told another AP to blacklist the client and is waiting for it to tell us that it has blacklisted the client.
-		STEERING_ASSOCIATING, // A remote AP has confirmed that it has blacklisted the client; AP is now waiting on an associate.
-		STEERING_ASSOCIATED,  // The client is using this AP to communicate with other devices.
-		STEERING_REJECTING,   // The AP has blacklisted the client is waiting on a disassociate and will then send out a closed packet to remotes.
-		STEERING_REJECTED,    // The client is blacklisted and disassociated.
-	} STEERING_state;
+	dl_list_for_each(client, &nsb->clients, struct net_steering_client, list) {
+		if (client->sta && os_memcmp(sa, client->sta->addr, ETH_ALEN) == 0) {
+			hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "probe request from "MACSTR" signal %d\n",
+				MAC2STR(sa), ssi_signal);
+			client->rssi = ssi_signal;
+			break;
+		}
+	}
 
-	unsigned int changed;
-	u8 addr[ETH_ALEN];
-};
+	return 0;
+}
+
+static void flood_score(void *eloop_data, void *user_ctx);
+
+static void start_flood_timer(struct net_steering_client *client)
+{
+	if (!eloop_register_timeout(FLOOD_TIMEOUT, 0, flood_score, client, NULL)) {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule flood\n",
+				MAC2STR(client->sta->addr));
+	}
+}
+
+static void flood_score(void *eloop_data, void *user_ctx)
+{
+	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
+	struct net_steering_bss* nsb = client->nsb;
+	struct wpabuf* buf;
+	int ret;
+	u8 own[ETH_ALEN];
+	u8 *dst = NULL;
+
+	// TODO pick a better encoding?
+	u16 score = abs(client->rssi);
+	buf = wpabuf_alloc(MAX_FRAME_SIZE);
+	put_header(buf, nsb->frame_sn++);
+	put_score(buf, client->sta->addr, nsb->hapd->conf->bssid, score);
+	finalize_header(buf);
+
+	// TODO need to manage configuration of peer list
+	l2_packet_get_own_addr(nsb->control, own);
+	dst = (os_memcmp(own, one, ETH_ALEN) == 0) ? two : one;
+
+	ret = l2_packet_send(nsb->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
+	if (ret < 0) {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "Failed flood to "MACSTR" : error %d\n",
+				MAC2STR(dst), ret);
+	}
+
+	wpabuf_free(buf);
+	start_flood_timer(client);
+}
+
+static void client_timeout(void *eloop_data, void *user_ctx)
+{
+	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
+	struct net_steering_bss* nsb = client->nsb;
+
+
+}
+
+
+static void start_timeout_timer(struct net_steering_client *client)
+{
+	if (!eloop_register_timeout(FLOOD_TIMEOUT, 0, client_timeout, client, NULL)) {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule timeout\n",
+				MAC2STR(client->sta->addr));
+	}
+}
 
 #define STATE_MACHINE_DATA struct net_steering_sm
 #define STATE_MACHINE_DEBUG_PREFIX "STEERING"
 #define STATE_MACHINE_ADDR sm->addr
 
-SM_STATE(STEERING, IDLE) {
-	SM_ENTRY(STEERING, IDLE);
+#define SM_EVENT(machine, fromstate, e_event, tostate) \
+static void sm_ ## machine ## _ ## fromstate ## _on_ ## e_event ## _ ## tostate(STATE_MACHINE_DATA *sm, \
+			int global)
+
+#define SM_TRANSITION(machine, fromstate, e_event, tostate) \
+	if (sm->machine ## _state == machine ## _ ## fromstate && event == machine ## _ ## e_event) { \
+		sm_ ## machine ## _ ## fromstate ## _on ## _ ## e_event ## _ ## tostate(sm, 0); \
+		SM_ENTER(STEERING, tostate); \
+		return; \
+	}
+
+#define SM_TRANS_NOOP(machine, fromstate, e_event, tostate) \
+	if (sm->machine ## _state == machine ## _ ## fromstate && event == machine ## _ ## e_event) { \
+		SM_ENTER(STEERING, tostate); \
+		return; \
+	}
+
+#define SM_STEP_EVENT(machine) \
+static void sm_ ## machine ## _do_Event(STATE_MACHINE_DATA *sm, int event)
+
+
+#define SM_STEP_EVENT_RUN(machine, event, sm) \
+	sm_ ## machine ## _do_Event(sm, machine ## _ ## event);
+
+
+SM_STATE(STEERING, IDLE) { SM_ENTRY(STEERING, IDLE); }
+SM_STATE(STEERING, CONFIRMING) { SM_ENTRY(STEERING, CONFIRMING); }
+SM_STATE(STEERING, ASSOCIATING) { SM_ENTRY(STEERING, ASSOCIATING); }
+SM_STATE(STEERING, ASSOCIATED) { SM_ENTRY(STEERING, ASSOCIATED); }
+SM_STATE(STEERING, REJECTING) { SM_ENTRY(STEERING, REJECTING); }
+SM_STATE(STEERING, REJECTED) { SM_ENTRY(STEERING, REJECTED); }
+
+SM_EVENT(STEERING, IDLE, E_ASSOCIATED, ASSOCIATED)
+{
+	// flood score
+	start_flood_timer(sm->client);
 }
 
-SM_STATE(STEERING, CONFIRMING) {
-	SM_ENTRY(STEERING, CONFIRMING);
+SM_EVENT(STEERING, IDLE, E_PEER_IS_WORSE, CONFIRMING)
+{
+	// send close client
 }
 
-SM_STATE(STEERING, ASSOCIATING) {
-	SM_ENTRY(STEERING, ASSOCIATING);
+SM_EVENT(STEERING, IDLE, E_PEER_NOT_WORSE, REJECTED)
+{
+	// blacklist
 }
 
-SM_STATE(STEERING, ASSOCIATED) {
-	SM_ENTRY(STEERING, ASSOCIATED);
+SM_EVENT(STEERING, IDLE, E_CLOSE_CLIENT, REJECTED)
+{
+	// close client
+	// blacklist
 }
 
-SM_STATE(STEERING, REJECTING) {
-	SM_ENTRY(STEERING, REJECTING);
+SM_EVENT(STEERING, CONFIRMING, E_PEER_IS_WORSE, CONFIRMING)
+{
+	// close client
 }
 
-SM_STATE(STEERING, REJECTED) {
-	SM_ENTRY(STEERING, REJECTED);
+SM_EVENT(STEERING, CONFIRMING, E_PEER_NOT_WORSE, REJECTED)
+{
+	// blacklist
+}
+
+
+SM_EVENT(STEERING, ASSOCIATING, E_PEER_IS_WORSE, ASSOCIATING)
+{
+	// close client
+}
+
+SM_EVENT(STEERING, ASSOCIATING, E_CLOSE_CLIENT, REJECTED)
+{
+	// closed client
+	// blacklist
+}
+
+
+SM_EVENT(STEERING, ASSOCIATED, E_CLOSE_CLIENT, REJECTING)
+{
+	// flood score
+	// blacklist
+	// disassociate
+	// clear remotes
+}
+
+SM_EVENT(STEERING, ASSOCIATED, E_DISASSOCIATED, IDLE)
+{
+	// flood score
+	// flood peer lost client
+}
+
+SM_EVENT(STEERING, ASSOCIATED, E_PEER_IS_WORSE, ASSOCIATED)
+{
+	// flood peer lost client
+	// close client
+}
+
+SM_EVENT(STEERING, REJECTING, E_DISASSOCIATED, REJECTED)
+{
+	// closed client
+}
+
+SM_EVENT(STEERING, REJECTING, E_PEER_IS_WORSE, CONFIRMING)
+{
+	// close client
+	// unblacklist
+}
+
+SM_EVENT(STEERING, REJECTING, E_PEER_LOST_CLIENT, CONFIRMING)
+{
+	// unblacklist
+}
+
+SM_EVENT(STEERING, REJECTING, E_TIMEOUT, ASSOCIATING)
+{
+	// unblacklist
+}
+
+SM_EVENT(STEERING, REJECTED, E_PEER_IS_WORSE, CONFIRMING)
+{
+	// close client
+}
+
+SM_EVENT(STEERING, REJECTED, E_PEER_LOST_CLIENT, CONFIRMING)
+{
+	// close client
+	// unblacklist
+}
+
+SM_EVENT(STEERING, REJECTED, E_CLOSE_CLIENT, REJECTED)
+{
+	// close client
+}
+
+SM_EVENT(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING)
+{
+	// unblacklist
+}
+
+SM_STEP_EVENT(STEERING)
+{
+	// Not sure if this is needed other than the macros in state_machine.h need it.
+	int global = 0;
+
+	SM_TRANSITION(STEERING, IDLE, E_ASSOCIATED, ASSOCIATED);
+	SM_TRANSITION(STEERING, IDLE, E_PEER_IS_WORSE, CONFIRMING);
+	SM_TRANSITION(STEERING, IDLE, E_PEER_NOT_WORSE, REJECTED);
+	SM_TRANS_NOOP(STEERING, IDLE, E_PEER_LOST_CLIENT, ASSOCIATING);
+	SM_TRANSITION(STEERING, IDLE, E_CLOSE_CLIENT, REJECTED);
+
+	SM_TRANS_NOOP(STEERING, CONFIRMING, E_CLOSED_CLIENT, ASSOCIATING);
+	SM_TRANS_NOOP(STEERING, CONFIRMING, E_ASSOCIATED, ASSOCIATED);
+	SM_TRANS_NOOP(STEERING, CONFIRMING, E_TIMEOUT, IDLE);
+	SM_TRANSITION(STEERING, CONFIRMING, E_PEER_IS_WORSE, CONFIRMING);
+	SM_TRANSITION(STEERING, CONFIRMING, E_PEER_NOT_WORSE, REJECTED);
+
+	SM_TRANS_NOOP(STEERING, ASSOCIATING, E_ASSOCIATED, ASSOCIATED);
+	SM_TRANS_NOOP(STEERING, ASSOCIATING, E_DISASSOCIATED, IDLE);
+	SM_TRANSITION(STEERING, ASSOCIATING, E_PEER_IS_WORSE, ASSOCIATING);
+	SM_TRANSITION(STEERING, ASSOCIATING, E_CLOSE_CLIENT, REJECTED);
+
+	SM_TRANSITION(STEERING, ASSOCIATED, E_CLOSE_CLIENT, REJECTING);
+	SM_TRANSITION(STEERING, ASSOCIATED, E_DISASSOCIATED, IDLE);
+	SM_TRANSITION(STEERING, ASSOCIATED, E_PEER_IS_WORSE, ASSOCIATED);
+
+	SM_TRANS_NOOP(STEERING, REJECTING, E_CLOSE_CLIENT, REJECTING);
+	SM_TRANSITION(STEERING, REJECTING, E_DISASSOCIATED, REJECTED);
+	SM_TRANSITION(STEERING, REJECTING, E_PEER_IS_WORSE, CONFIRMING);
+	SM_TRANSITION(STEERING, REJECTING, E_PEER_LOST_CLIENT, CONFIRMING);
+	SM_TRANSITION(STEERING, REJECTING, E_TIMEOUT, ASSOCIATING);
+
+	SM_TRANSITION(STEERING, REJECTED, E_PEER_IS_WORSE, CONFIRMING);
+	SM_TRANSITION(STEERING, REJECTED, E_PEER_LOST_CLIENT, CONFIRMING);
+	SM_TRANSITION(STEERING, REJECTED, E_CLOSE_CLIENT, REJECTED);
+	SM_TRANSITION(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING);
 }
 
 static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 {
-	struct net_steering_context* nsc = ctx;
+	struct net_steering_bss* nsb = ctx;
 	u16 sn = 0;
 	u8 magic, version, type_tlv, tlv_len = 0;
 	u16 packet_len = 0;
@@ -191,7 +456,7 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 
 	num_read = parse_header(buf_pos, len, &magic, &version, &packet_len, &sn);
 	if (!num_read) {
-		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping short message from "MACSTR": %d bytes\n",
 				MAC2STR(src_addr), len);
@@ -199,7 +464,7 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 	}
 
 	if (len < packet_len) {
-		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping short message from "MACSTR": recv %d bytes, expected %d\n",
 				MAC2STR(src_addr), len, packet_len);
@@ -207,7 +472,7 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 	}
 
 	if (tlv_version != version || tlv_magic != magic) {
-		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG,
 				"Dropping invalid message from "MACSTR": magic %d version %d\n",
 				MAC2STR(src_addr), magic, version);
@@ -218,7 +483,7 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 	while (buf_pos < buf + packet_len) {
 		num_read = parse_tlv_header(buf_pos, packet_len-(buf_pos-buf), &type_tlv, &tlv_len);
 		if (!num_read) {
-			hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 					HOSTAPD_LEVEL_DEBUG, "Could not parse tlv header from "MACSTR"\n",
 					len, MAC2STR(src_addr));
 			return;
@@ -230,7 +495,7 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 		case TLV_SCORE:
 			num_read = parse_score(buf_pos, tlv_len, sta, bssid, &score);
 			if (!num_read) {
-				hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 						HOSTAPD_LEVEL_DEBUG, "Could not parse score from "MACSTR"\n",
 						len, MAC2STR(src_addr));
 				return;
@@ -247,73 +512,106 @@ static void nsc_receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len
 		}
 	}
 
-	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "Received %d bytes from "MACSTR" : %d\n",
 			len, MAC2STR(src_addr), ntohs(sn));
 }
 
-void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
+static void net_steering_del_client(struct net_steering_client* client)
 {
-	struct wpabuf *buf;
-	int ret = 0;
-	u8 *dst = NULL;
-	struct net_steering_context* nsc = NULL;
-	u8 own[ETH_ALEN];
-	u16 score = 0;
+	eloop_cancel_timeout(flood_score, client, NULL);
+	dl_list_del(&client->list);
+	os_memset(client, 0, sizeof(*client));
+	os_free(client);
+}
 
-	dl_list_for_each(nsc, &nsc_list, struct net_steering_context, list) {
-		if (nsc->hapd == hapd) break;
+void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta)
+{
+	struct net_steering_bss* nsb = NULL;
+	struct net_steering_client *client, *ctmp;
+
+	// find the context
+	dl_list_for_each(nsb, &nsb_list, struct net_steering_bss, list) {
+		if (nsb->hapd == hapd) break;
 	}
 
-	if (!nsc) {
+	if (!nsb) {
 		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_WARNING, "Association to unknown bss "MACSTR"\n",
 			MAC2STR(hapd->conf->bssid));
 		return;
 	}
 
-	// TODO compute score!
-	// TODO track the client, or is it already tracked in hapd somewhere?
+	// find the client and clean it up
+	dl_list_for_each_safe(client, ctmp, &nsb->clients, struct net_steering_client, list) {
+		if (client->sta == sta) {
+			// TODO Log this event
+			SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, &(client->sm));
+			net_steering_del_client(client);
+			break;
+		}
+	}
+}
 
-	buf = wpabuf_alloc(MAX_FRAME_SIZE);
-	put_header(buf, nsc->frame_sn++);
-	put_score(buf, sta->addr, nsc->hapd->conf->bssid, score);
-	// TODO remove this extra score put here as test
-	score = 10;
-	put_score(buf, sta->addr, nsc->hapd->conf->bssid, score);
-	finalize_header(buf);
+void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
+{
+	struct net_steering_bss* nsb = NULL;
+	struct net_steering_client* client = NULL;
 
-	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_DEBUG, "net_steering_association - "MACSTR" associated to "MACSTR"\n",
-				MAC2STR(sta->addr), MAC2STR(nsc->hapd->conf->bssid));
-
-	// TODO need to manage configuration of peer list
-	l2_packet_get_own_addr(nsc->control, own);
-	dst = (os_memcmp(own, one, ETH_ALEN) == 0) ? two : one;
-
-	ret = l2_packet_send(nsc->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
-	if (ret < 0) {
-		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_DEBUG, "Failed l2 send to "MACSTR" : error %d\n",
-				MAC2STR(dst), ret);
+	dl_list_for_each(nsb, &nsb_list, struct net_steering_bss, list) {
+		if (nsb->hapd == hapd) break;
 	}
 
-	wpabuf_free(buf);
+	if (!nsb) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_WARNING, "Association to unknown bss "MACSTR"\n",
+			MAC2STR(hapd->conf->bssid));
+		return;
+	}
+
+	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_DEBUG, "net_steering_association - "MACSTR" associated to "MACSTR"\n",
+				MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid));
+
+	// TODO Scan the list of existing clients
+
+	client = (struct net_steering_client*) os_zalloc(sizeof(*client));
+	if (!client)
+	{
+		// LOG and return
+		return;
+	}
+
+	// TODO Verify lifetime of the sta pointer.
+	client->sta = sta;
+	client->nsb = nsb;
+	client->rssi = -1;
+	client->sm.STEERING_state = STEERING_IDLE;
+	client->sm.client = client;
+
+	dl_list_add(&nsb->clients, &client->list);
+
+	SM_STEP_EVENT_RUN(STEERING, E_ASSOCIATED, &(client->sm));
 }
 
 void net_steering_deinit(struct hostapd_data *hapd)
 {
-	struct net_steering_context* nsc;
-	struct net_steering_context* tmp;
+	struct net_steering_bss *nsb, *tmp;
 
-	dl_list_for_each_safe(nsc, tmp, &nsc_list, struct net_steering_context, list) {
-		if (nsc->hapd == hapd) {
-			if (nsc->control != NULL) {
-				l2_packet_deinit(nsc->control);
+	dl_list_for_each_safe(nsb, tmp, &nsb_list, struct net_steering_bss, list) {
+		if (nsb->hapd == hapd) {
+			struct net_steering_client *client, *ctmp;
+			if (nsb->control != NULL) {
+				l2_packet_deinit(nsb->control);
 				wpa_printf(MSG_DEBUG, "net_steering_deinit - l2_packet_deinit");
 			}
-			os_memset(nsc, 0, sizeof(*nsc));
-			os_free(nsc);
+
+			// free all clients
+			dl_list_for_each_safe(client, ctmp, &nsb->clients, struct net_steering_client, list) {
+				net_steering_del_client(client);
+			}
+			os_memset(nsb, 0, sizeof(*nsb));
+			os_free(nsb);
 			break;
 		}
 	}
@@ -321,31 +619,33 @@ void net_steering_deinit(struct hostapd_data *hapd)
 
 int net_steering_init(struct hostapd_data *hapd)
 {
-	struct net_steering_context* nsc = (struct net_steering_context*) os_zalloc(sizeof(*nsc));
+	struct net_steering_bss* nsb = (struct net_steering_bss*) os_zalloc(sizeof(*nsb));
 
-	if (!nsc) return -1;
-
-	nsc->hapd = hapd;
+	if (!nsb) return -1;
 
 	// TODO: what if there is no bridge in use? use iface?
-	nsc->control = l2_packet_init(hapd->conf->bridge, NULL, proto, nsc_receive, nsc, 0);
-	if (nsc->control == NULL) {
+	nsb->control = l2_packet_init(hapd->conf->bridge, NULL, proto, nsc_receive, nsb, 0);
+	if (nsb->control == NULL) {
 
-		hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG, "net_steering_init - l2_packet_init failed for %s with bssid "MACSTR"\n",
-				hapd->conf->bridge, MAC2STR(nsc->hapd->conf->bssid));
+				hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid));
 
-		os_memset(nsc, 0, sizeof(*nsc));
-		os_free(nsc);
+		os_memset(nsb, 0, sizeof(*nsb));
+		os_free(nsb);
 		return -1;
 	}
 
-	// add the context to the end of the list
-	dl_list_add(&nsc_list, &nsc->list);
+	nsb->hapd = hapd;
+	dl_list_init(&nsb->clients);
 
-	hostapd_logger(nsc->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+	// add the context to the end of the list
+	dl_list_add(&nsb_list, &nsb->list);
+	hostapd_register_probereq_cb(hapd, probe_req_cb, nsb);
+
+	hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "net_steering_init - ready on %s with bssid "MACSTR"\n",
-			hapd->conf->bridge, MAC2STR(nsc->hapd->conf->bssid));
+			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid));
 
 	return 0;
 }

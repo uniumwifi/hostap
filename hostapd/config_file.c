@@ -3289,10 +3289,6 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		wpabuf_free(bss->own_ie_override);
 		bss->own_ie_override = tmp;
 #endif /* CONFIG_TESTING_OPTIONS */
-#ifdef CONFIG_NET_STEERING
-	} else if (os_strcmp(buf, "steering_iface") == 0) {
-		os_strlcpy(bss->steering_iface, pos, sizeof(bss->steering_iface));
-#endif /* CONFIG_NET_STEERING */
 	} else if (os_strcmp(buf, "vendor_elements") == 0) {
 		struct wpabuf *elems;
 		size_t len = os_strlen(pos);

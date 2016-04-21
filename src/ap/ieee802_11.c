@@ -2046,6 +2046,10 @@ static void handle_disassoc(struct hostapd_data *hapd,
 		return;
 	}
 
+#ifdef CONFIG_NET_STEERING
+	net_steering_disassociation(hapd, sta);
+#endif  /* CONFIG_NET_STEERING */
+
 	ap_sta_set_authorized(hapd, sta, 0);
 	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
 	sta->flags &= ~(WLAN_STA_ASSOC | WLAN_STA_ASSOC_REQ_OK);
