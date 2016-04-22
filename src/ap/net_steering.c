@@ -1015,7 +1015,7 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 	struct net_steering_bss* nsb = NULL;
 	struct net_steering_client *client, *ctmp;
 
-	if (!nsb) return;
+	if (dl_list_empty(&nsb_list)) return;
 
 	// find the context
 	dl_list_for_each(nsb, &nsb_list, struct net_steering_bss, list) {
@@ -1049,7 +1049,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	struct net_steering_bss* nsb = NULL;
 	struct net_steering_client* client = NULL;
 
-	if (!nsb) return;
+	if (dl_list_empty(&nsb_list)) return;
 
 	dl_list_for_each(nsb, &nsb_list, struct net_steering_bss, list) {
 		if (nsb->hapd == hapd) break;
@@ -1093,7 +1093,7 @@ void net_steering_deinit(struct hostapd_data *hapd)
 {
 	struct net_steering_bss *nsb, *tmp;
 
-	if (!nsb) return;
+	if (dl_list_empty(&nsb_list)) return;
 
 	dl_list_for_each_safe(nsb, tmp, &nsb_list, struct net_steering_bss, list) {
 		if (nsb->hapd == hapd) {
@@ -1121,15 +1121,21 @@ int net_steering_init(struct hostapd_data *hapd)
 	struct net_steering_bss* nsb = NULL;
 
 	/* see if there is any configuration */
-	if (!hapd) return 0;
-	if (!hapd->conf) return 0;
-	if (!hapd->conf->net_steeering_mode) return 0;
-	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) return 0;
+	if (!hapd->conf->net_steeering_mode) {
+		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "no configuration, disabled.\n");
+		return 0;
+	}
+	/* if configuration is off, do nothing */
+	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) {
+		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "configured off, disabled.\n");
+		return 0;
+	}
 	// We piggy-back on fast transition configuration, and use that config to identify our peer APs
 	if (!hapd->conf->r0kh_list) {
-		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "no FT peers configured on bssid "MACSTR"\n",
-				MAC2STR(nsb->hapd->conf->bssid));
+		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "no key holders configured, disabled.\n");
 		return 0;
 	}
 
@@ -1141,8 +1147,8 @@ int net_steering_init(struct hostapd_data *hapd)
 	nsb->control = l2_packet_init(hapd->conf->bridge, NULL, proto, receive, nsb, 0);
 	if (nsb->control == NULL) {
 		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "net_steering_init - l2_packet_init failed for %s with bssid "MACSTR"\n",
-				hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid));
+				HOSTAPD_LEVEL_WARNING, "net_steering_init - l2_packet_init failed for %s\n",
+				hapd->conf->bridge);
 
 		os_memset(nsb, 0, sizeof(*nsb));
 		os_free(nsb);
@@ -1157,8 +1163,8 @@ int net_steering_init(struct hostapd_data *hapd)
 	hostapd_register_probereq_cb(hapd, probe_req_cb, nsb);
 
 	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_INFO, "ready on %s with bssid "MACSTR" own addr "MACSTR": mode: %s\n",
-			hapd->conf->bridge, MAC2STR(nsb->hapd->conf->bssid), MAC2STR(nsb->hapd->own_addr),
+			HOSTAPD_LEVEL_INFO, "ready on %s, own addr "MACSTR": mode: %s\n",
+			hapd->conf->bridge, MAC2STR(nsb->hapd->own_addr),
 			hapd->conf->net_steeering_mode);
 
 	if (os_strcmp(hapd->conf->net_steeering_mode, mode_suggest) == 0) nsb->mode = MODE_SUGGEST;
