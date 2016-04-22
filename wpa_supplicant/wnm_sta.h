@@ -59,19 +59,4 @@ int wnm_send_bss_transition_mgmt_query(struct wpa_supplicant *wpa_s,
 				       u8 query_reason);
 void wnm_deallocate_memory(struct wpa_supplicant *wpa_s);
 
-
-#ifdef CONFIG_WNM
-
-int wnm_scan_process(struct wpa_supplicant *wpa_s);
-int wnm_scan_process_cb(struct wpa_supplicant *wpa_s, struct wpa_scan_results *scan_res);
-
-#else /* CONFIG_WNM */
-
-static inline int wnm_scan_process(struct wpa_supplicant *wpa_s)
-{
-	return 0;
-}
-
-#endif /* CONFIG_WNM */
-
 #endif /* WNM_STA_H */
