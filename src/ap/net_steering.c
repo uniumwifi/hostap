@@ -727,8 +727,8 @@ SM_EVENT(STEERING, REJECTING, E_DISASSOCIATED, REJECTED)
 
 SM_EVENT(STEERING, REJECTING, E_PEER_IS_WORSE, CONFIRMING)
 {
-	flood_close_client(sm);
 	do_client_blacklist_rm(sm);
+	flood_close_client(sm);
 	client_stop_timer(sm);
 }
 
@@ -746,14 +746,15 @@ SM_EVENT(STEERING, REJECTING, E_TIMEOUT, ASSOCIATING)
 
 SM_EVENT(STEERING, REJECTED, E_PEER_IS_WORSE, CONFIRMING)
 {
+	do_client_blacklist_rm(sm);
 	flood_close_client(sm);
 	client_stop_timer(sm);
 }
 
 SM_EVENT(STEERING, REJECTED, E_PEER_LOST_CLIENT, CONFIRMING)
 {
-	flood_close_client(sm);
 	do_client_blacklist_rm(sm);
+	flood_close_client(sm);
 	client_stop_timer(sm);
 }
 
@@ -1014,6 +1015,8 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 	struct net_steering_bss* nsb = NULL;
 	struct net_steering_client *client, *ctmp;
 
+	if (!nsb) return;
+
 	// find the context
 	dl_list_for_each(nsb, &nsb_list, struct net_steering_bss, list) {
 		if (nsb->hapd == hapd) break;
@@ -1045,6 +1048,8 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 {
 	struct net_steering_bss* nsb = NULL;
 	struct net_steering_client* client = NULL;
+
+	if (!nsb) return;
 
 	dl_list_for_each(nsb, &nsb_list, struct net_steering_bss, list) {
 		if (nsb->hapd == hapd) break;
@@ -1088,6 +1093,8 @@ void net_steering_deinit(struct hostapd_data *hapd)
 {
 	struct net_steering_bss *nsb, *tmp;
 
+	if (!nsb) return;
+
 	dl_list_for_each_safe(nsb, tmp, &nsb_list, struct net_steering_bss, list) {
 		if (nsb->hapd == hapd) {
 			struct net_steering_client *client, *ctmp;
@@ -1114,9 +1121,11 @@ int net_steering_init(struct hostapd_data *hapd)
 	struct net_steering_bss* nsb = NULL;
 
 	/* see if there is any configuration */
+	if (!hapd) return 0;
+	if (!hapd->conf) return 0;
 	if (!hapd->conf->net_steeering_mode) return 0;
 	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) return 0;
-	// We piggy-back on 802.11R configuration, and use that config to identify our peer APs
+	// We piggy-back on fast transition configuration, and use that config to identify our peer APs
 	if (!hapd->conf->r0kh_list) {
 		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "no FT peers configured on bssid "MACSTR"\n",
