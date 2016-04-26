@@ -842,8 +842,9 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 	/* update the remote bssid */
 	client_set_remote_bssid(client, bssid);
 
-	/* if we hear scores from another, assume the STA has disassociated */
-	if (client_is_associated(client)) {
+	/* if we hear a score better than ours, assume the STA has disassociated */
+	/* TODO include age to determine if we should disasssociate the client */
+	if ((client->score > score) && client_is_associated(client)) {
 		do_client_disassociate(client);
 		SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
 	} else {

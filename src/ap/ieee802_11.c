@@ -1988,8 +1988,8 @@ static void handle_assoc(struct hostapd_data *hapd,
 #endif /* CONFIG_IEEE80211N */
 
 	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
-		       HOSTAPD_LEVEL_DEBUG,
-		       "association OK (aid %d)", sta->aid);
+			HOSTAPD_LEVEL_INFO, "association OK (aid %d) on channel %d BSSID "MACSTR,
+			sta->aid, hapd->iconf->channel, MAC2STR(mgmt->bssid));
 	/* Station will be marked associated, after it acknowledges AssocResp
 	 */
 	sta->flags |= WLAN_STA_ASSOC_REQ_OK;
@@ -2045,10 +2045,6 @@ static void handle_disassoc(struct hostapd_data *hapd,
 			   MAC2STR(mgmt->sa));
 		return;
 	}
-
-#ifdef CONFIG_NET_STEERING
-	net_steering_disassociation(hapd, sta);
-#endif  /* CONFIG_NET_STEERING */
 
 	ap_sta_set_authorized(hapd, sta, 0);
 	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
