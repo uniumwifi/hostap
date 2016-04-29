@@ -65,7 +65,9 @@ struct net_steering_client
 	u16 score;
 
 	enum {
-        /* AP will allow the client to associate with it. */
+        /*
+         * AP will allow the client to associate with it.
+         */
 		STEERING_IDLE,
 		/*
 		 * AP has told another AP to blacklist the client and is waiting for it
@@ -77,25 +79,55 @@ struct net_steering_client
 		 * now waiting on an associate.
 		 */
 		STEERING_ASSOCIATING,
-		/* The client is using this AP to communicate with other devices. */
+		/*
+		 * The client is using this AP to communicate with other devices.
+		 */
 		STEERING_ASSOCIATED,
 		/*
 		 * The AP has blacklisted the client is waiting on a disassociate and will
 		 * then send out a closed packet to remotes.
 		 */
 		STEERING_REJECTING,
-	    /* The client is blacklisted and disassociated. */
+	    /*
+	     * The client is blacklisted and disassociated.
+	     */
 		STEERING_REJECTED,
 	} STEERING_state;
 
 	enum {
+		/*
+		 * The client has started to use this AP to communicate with other devices.
+		 * Note that we don't attempt to explicitly model the client so (dis)associate
+		 * events just appear on APs.
+		 */
 		STEERING_E_ASSOCIATED,
+		/*
+		 * The client has either gone away or associated with a different AP.
+		 */
 		STEERING_E_DISASSOCIATED,
+		/*
+		 * A remote AP sent a client score packet with a score worse than our local score.
+		 */
 		STEERING_E_PEER_IS_WORSE,
+		/*
+		 * A remote AP sent a client score packet with a score the same as (or better) than our local score.
+		 */
 		STEERING_E_PEER_NOT_WORSE,
+		/*
+		 * A remote AP sent a client score that is the maximum possible.
+		 */
 		STEERING_E_PEER_LOST_CLIENT,
+		/*
+		 * The AP has been told to blacklist the client.
+		 */
 		STEERING_E_CLOSE_CLIENT,
+		/*
+		 * A remote AP has confirmed that it has blacklisted the client.
+		 */
 		STEERING_E_CLOSED_CLIENT,
+		/*
+		 * Used to limit how long an AP waits on an event (e.g. ClosedClientPacket).
+		 */
 		STEERING_E_TIMEOUT,
 	} STEERING_event;
 
@@ -612,9 +644,9 @@ static void sm_ ## machine ## _ ## fromstate ## _on_ ## e_event ## _ ## tostate(
 #define SM_TRANSITION(machine, fromstate, e_event, tostate) \
 	if (sm->machine ## _state == machine ## _ ## fromstate && event == machine ## _ ## e_event) { \
 		hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING, \
-		HOSTAPD_LEVEL_DEBUG, "Client "MACSTR" transition %s %s %s\n",\
-		MAC2STR(client_get_mac(sm)), state_to_str(sm->machine ## _state), \
-		event_to_str(machine ## _ ## e_event), state_to_str(machine ## _ ## tostate)); \
+		HOSTAPD_LEVEL_DEBUG, "%s => %s "MACSTR" %s\n",\
+		state_to_str(sm->machine ## _state), state_to_str(machine ## _ ## tostate), \
+		MAC2STR(client_get_mac(sm)), event_to_str(machine ## _ ## e_event)); \
 		sm_ ## machine ## _ ## fromstate ## _on ## _ ## e_event ## _ ## tostate(sm, 0); \
 		SM_ENTER(STEERING, tostate); \
 		return; \
@@ -623,9 +655,9 @@ static void sm_ ## machine ## _ ## fromstate ## _on_ ## e_event ## _ ## tostate(
 #define SM_TRANS_NOOP(machine, fromstate, e_event, tostate) \
 	if (sm->machine ## _state == machine ## _ ## fromstate && event == machine ## _ ## e_event) { \
 		hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING, \
-		HOSTAPD_LEVEL_DEBUG, "Client "MACSTR" noop transition %s %s %s\n",\
-		MAC2STR(client_get_mac(sm)), state_to_str(sm->machine ## _state), \
-		event_to_str(machine ## _ ## e_event), state_to_str(machine ## _ ## tostate)); \
+		HOSTAPD_LEVEL_DEBUG, "%s => %s "MACSTR" %s noop\n",\
+		state_to_str(sm->machine ## _state), state_to_str(machine ## _ ## tostate), \
+		MAC2STR(client_get_mac(sm)), event_to_str(machine ## _ ## e_event)); \
 		SM_ENTER(STEERING, tostate); \
 		return; \
 	}
