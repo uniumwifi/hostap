@@ -579,7 +579,7 @@ static void do_client_disassociate(struct net_steering_client* client)
 				HOSTAPD_LEVEL_INFO, "Fast BSS transition for "MACSTR" to "MACSTR" on channel %d\n",
 				MAC2STR(client_get_mac(client)), MAC2STR(client_get_remote_bssid(client)), client->remote_channel);
 
-			wnm_send_bss_transition(client->nsb->hapd, client->sta, transition_timeout,
+			wnm_send_bss_tm_req2(client->nsb->hapd, client->sta, transition_timeout,
 					client_get_remote_bssid(client), client->remote_channel);
 		} else {
 			hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
@@ -1156,21 +1156,29 @@ int net_steering_init(struct hostapd_data *hapd)
 	/* see if there is any configuration */
 	if (!hapd->conf->net_steeering_mode) {
 		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "no configuration, disabled.\n");
+				HOSTAPD_LEVEL_WARNING, "no configuration, steering disabled.\n");
 		return 0;
 	}
 	/* if configuration is off, do nothing */
 	if (os_strcmp(hapd->conf->net_steeering_mode, mode_off) == 0) {
 		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "configured off, disabled.\n");
+				HOSTAPD_LEVEL_WARNING, "configured off, steering disabled.\n");
 		return 0;
 	}
+
+#ifdef CONFIG_IEEE80211R
 	// We piggy-back on fast transition configuration, and use that config to identify our peer APs
 	if (!hapd->conf->r0kh_list) {
 		hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_WARNING, "no key holders configured, disabled.\n");
+				HOSTAPD_LEVEL_WARNING, "No FT key holders configured, steering disabled.\n");
 		return 0;
 	}
+#else
+	hostapd_logger(hapd, hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_WARNING, "FT feature not included in this build, steering disabled.\n");
+	/* Signaling an error since user enabled steering, but R is not included */
+	return -1;
+#endif
 
 	nsb = (struct net_steering_bss*) os_zalloc(sizeof(*nsb));
 

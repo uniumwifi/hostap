@@ -636,45 +636,22 @@ BSS Transition Management capability in the Extended Capabilities element.
 A non-AP STA that supports BSS transition management shall
 respond to an individually addressed BSS Transition Management Request frame with a BSS Transition
 Management Response frame.
+This version will create the neighbor report using the passed in bssid and channel
 */
-int wnm_send_bss_transition(struct hostapd_data *hapd,
-				   struct sta_info *sta, int disassoc_timer, const u8 *ap_addr, u8 ap_channel)
+int wnm_send_bss_tm_req2(struct hostapd_data *hapd,
+		struct sta_info *sta, int disassoc_timer,
+		const u8 *bssid, u8 ap_channel)
 {
-	u8 buf[1000], *pos;
-	struct ieee80211_mgmt *mgmt;
+	static const u8 valid_int = 255;
 	u8 report_ie_len;
 	u8 op_class, channel;
-	struct wnm_neighbor_report_element report_ie;
+	struct wnm_neighbor_report_element* report_ie;
+	u8 req_mode = 0;
+	u8* nre = NULL;
+	u8* pos = NULL;
 
-	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
-			HOSTAPD_LEVEL_INFO, "WNM: Send BSS Transition Management Request "
-		   "client "MACSTR" (disassoc_timer=%d) to AP "
-		   MACSTR, MAC2STR(sta->addr), disassoc_timer, MAC2STR(ap_addr));
-
-	os_memset(buf, 0, sizeof(buf));
-	mgmt = (struct ieee80211_mgmt *) buf;
-	mgmt->frame_control = IEEE80211_FC(WLAN_FC_TYPE_MGMT,
-					   WLAN_FC_STYPE_ACTION);
-	os_memcpy(mgmt->da, sta->addr, ETH_ALEN);
-	os_memcpy(mgmt->sa, hapd->own_addr, ETH_ALEN);
-	os_memcpy(mgmt->bssid, hapd->own_addr, ETH_ALEN);
-	mgmt->u.action.category = WLAN_ACTION_WNM;
-	mgmt->u.action.u.bss_tm_req.action = WNM_BSS_TRANS_MGMT_REQ;
-	mgmt->u.action.u.bss_tm_req.dialog_token = 1;
-	mgmt->u.action.u.bss_tm_req.req_mode =
-		WNM_BSS_TM_REQ_ABRIDGED |
-		WNM_BSS_TM_REQ_PREF_CAND_LIST_INCLUDED;
-	if(disassoc_timer > 0) {
-		mgmt->u.action.u.bss_tm_req.req_mode |=
-			WNM_BSS_TM_REQ_DISASSOC_IMMINENT;
-	mgmt->u.action.u.bss_tm_req.disassoc_timer =
-		host_to_le16(disassoc_timer);
-	}
-	mgmt->u.action.u.bss_tm_req.validity_interval = 255;
-
-	pos = mgmt->u.action.u.bss_tm_req.variable;
-
-	/* 802.11-2012
+	/*
+	802.11-2012
 	The BSS Transition Candidate List Entries field of a BSS Transition Management Response frame contains
 	zero or more Neighbor Report elements describing the non-AP STA’s preferences for target BSS
 	candidates. The Preference field value of a Neighbor Report element used in a BSS Transition Management
@@ -684,91 +661,67 @@ int wnm_send_bss_transition(struct hostapd_data *hapd,
 	Preference field, and equal numbers representing equal preference. The non-AP STA should not list any
 	BSS that is not considered as a target BSS candidate.
 
-
 	Contains the description of candidate BSS transition APs and their capabilities as described in 8.4.2.39.
 	*/
-	os_memset(&report_ie, 0, sizeof(struct wnm_neighbor_report_element));
+	/* add 3 octets for candidate preference */
+	report_ie = (struct wnm_neighbor_report_element*)
+			os_zalloc(sizeof(struct wnm_neighbor_report_element) + 3);
+	if (report_ie == NULL) return -1;
+
+	req_mode = WNM_BSS_TM_REQ_ABRIDGED | WNM_BSS_TM_REQ_PREF_CAND_LIST_INCLUDED;
+	if(disassoc_timer > 0) {
+		req_mode |= WNM_BSS_TM_REQ_DISASSOC_IMMINENT;
+	}
+
 	report_ie_len = sizeof(struct wnm_neighbor_report_element);
-	report_ie.eid = WLAN_EID_NEIGHBOR_REPORT;
-	report_ie.len = report_ie_len - 2 + 3;
-	os_memcpy(report_ie.bssid, ap_addr, 6);
+	report_ie->eid = WLAN_EID_NEIGHBOR_REPORT;
+	report_ie->len = report_ie_len - 2 + 3;
+	os_memcpy(report_ie->bssid, bssid, ETH_ALEN);
 
 	if (ieee80211_freq_to_channel_ext(hapd->iface->freq,
 						  hapd->iconf->secondary_channel,
 						  hapd->iconf->vht_oper_chwidth,
 						  &op_class, &channel) != NUM_HOSTAPD_MODES)
-		report_ie.operating_class = op_class;
+		report_ie->operating_class = op_class;
 
-	// dot11RMNeighborReportPhyType OBJECT-TYPE
-	// SYNTAX INTEGER {
-	// fhss(1),
-	// dsss(2),
-	// irbaseband(3),
-	// ofdm(4),
-	// hrdsss(5),
-	// erp(6),
-	// ht(7) }
-	//report_ie.PHY_type =
-	report_ie.channel_number = ap_channel;
+	/*
+	 dot11RMNeighborReportPhyType OBJECT-TYPE
+		SYNTAX INTEGER {
+	 	 fhss(1),
+	 	 dsss(2),
+	 	 irbaseband(3),
+	 	 ofdm(4),
+	 	 hrdsss(5),
+	 	 erp(6),
+	 	 ht(7) }
+	 	 report_ie.PHY_type =
+	 */
+	report_ie->channel_number = ap_channel;
 
-	// The AP Reachability field indicates whether the AP identified by this BSSID is reachable by the STA that
-	// requested the neighbor report. For example, the AP identified by this BSSID is reachable for the exchange of
-	// preauthentication frames as described in 11.5.9.2
+	/*
+	The AP Reachability field indicates whether the AP identified by this BSSID is reachable by the STA that
+	requested the neighbor report. For example, the AP identified by this BSSID is reachable for the exchange of
+	preauthentication frames as described in 11.5.9.2
 
-	// The Security bit, if 1, indicates that the AP identified by this BSSID supports the same security provisioning
-	// as used by the STA in its current association.
-	report_ie.bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
+	The Security bit, if 1, indicates that the AP identified by this BSSID supports the same security provisioning
+	as used by the STA in its current association.
+    */
+	report_ie->bssid_info[0] = WNM_REACHABILITY_REACHABLE | WNM_SECURITY;
 
-	os_memcpy(pos, &report_ie, report_ie_len);
-
-	// copy single neighbor report IE here
+	pos = (u8*) report_ie;
 	pos += report_ie_len;
 
-	// BSS Transition Candidate Preference subelement field
-	*pos++ = 3;
-	*pos++ = 1;
-	*pos++ = 255;
+	/*  BSS Transition Candidate Preference subelement field */
+	*pos++ = 3;   /* Subelement ID */
+	*pos++ = 1;   /* length */
+	*pos++ = 255; /* Preference */
 	report_ie_len += 3;
 
-	if (hostapd_drv_send_mlme(hapd, buf, pos - buf, 0) < 0) {
-		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
-			HOSTAPD_LEVEL_WARNING, "Failed to send BSS Transition Management Request frame");
+	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_INFO, "WNM: Send BSS Transition Management Request "
+		   "client "MACSTR" (disassoc_timer=%d) to AP "MACSTR,
+		   MAC2STR(sta->addr), disassoc_timer, MAC2STR(bssid));
 
-		wpa_printf(MSG_DEBUG, "Failed to send BSS Transition Management Request frame");
-		return -1;
-	}
-
-	/* send disassociation frame after time-out */
-	if (disassoc_timer > 0) {
-		int timeout, beacon_int;
-
-		/*
-		 * Prevent STA from reconnecting using cached PMKSA to force
-		 * full authentication with the authentication server (which may
-		 * decide to reject the connection),
-		 */
-		wpa_auth_pmksa_remove(hapd->wpa_auth, sta->addr);
-
-		beacon_int = hapd->iconf->beacon_int;
-		if (beacon_int < 1)
-			beacon_int = 100; /* best guess */
-
-		/* Calculate timeout in ms based on beacon_int in TU 100 beacon inteval*/
-		timeout = disassoc_timer * (beacon_int * 128 / 125);
-		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
-				HOSTAPD_LEVEL_DEBUG, "Disassociation timer for " MACSTR
-				" set to %d ms", MAC2STR(sta->addr), timeout);
-
-		//wpa_printf(MSG_DEBUG, "Disassociation timer for " MACSTR
-		//	   " set to %d ms", MAC2STR(sta->addr), timeout);
-
-		sta->timeout_next = STA_DISASSOC_FROM_CLI;
-		eloop_cancel_timeout(ap_handle_timer, hapd, sta);
-		eloop_register_timeout(timeout / 1000,
-				       timeout % 1000 * 1000,
-				       ap_handle_timer, hapd, sta);
-	}
-
-	return 0;
+	return wnm_send_bss_tm_req(hapd, sta, req_mode, disassoc_timer, valid_int, NULL, NULL, (u8*) report_ie, report_ie_len);
 }
 

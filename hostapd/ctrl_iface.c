@@ -1130,7 +1130,7 @@ static int hostapd_ctrl_iface_bss_transition(struct hostapd_data *hapd,
 	sscanf(channelstr, "%hhu", &dest_ap_channel); // C99 way of reading in an unsigned char
 	//dest_ap_channel = atoi(channelstr);
 
-	return wnm_send_bss_transition(hapd, sta, disassoc_timer, ap_addr, dest_ap_channel);
+	return wnm_send_bss_tm_req2(hapd, sta, disassoc_timer, ap_addr, dest_ap_channel);
 }
 
 #endif /* CONFIG_WNM */

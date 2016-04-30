@@ -23,7 +23,7 @@ int wnm_send_bss_tm_req(struct hostapd_data *hapd, struct sta_info *sta,
 			u8 req_mode, int disassoc_timer, u8 valid_int,
 			const u8 *bss_term_dur, const char *url,
 			const u8 *nei_rep, size_t nei_rep_len);
-int wnm_send_bss_transition(struct hostapd_data *hapd,
+int wnm_send_bss_tm_req2(struct hostapd_data *hapd,
 				   struct sta_info *sta, int disassoc_timer, const u8 *ap_addr, u8 ap_channel);
 
 
