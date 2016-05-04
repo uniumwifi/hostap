@@ -472,14 +472,14 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 {
 
 	u8 i;
-	struct wpa_bss *bss = wpa_s->current_bss;
+	struct wpa_bss *current_bss = wpa_s->current_bss;
 	struct wpa_bss *target;
 
-	if (!bss)
+	if (!current_bss)
 		return 0;
 
 	wpa_printf(MSG_DEBUG, "WNM: Current BSS " MACSTR " RSSI %d",
-		   MAC2STR(wpa_s->bssid), bss->level);
+		   MAC2STR(wpa_s->bssid), current_bss->level);
 
 	for (i = 0; i < wpa_s->wnm_num_neighbor_report; i++) {
 		struct neighbor_report *nei;
@@ -491,7 +491,7 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 			continue;
 		}
 
-		target = wpa_bss_get_bssid(wpa_s, nei->bssid);
+		target = wpa_bss_get(wpa_s, nei->bssid, current_bss->ssid, current_bss->ssid_len);
 		if (!target) {
 			wpa_printf(MSG_DEBUG, "Candidate BSS " MACSTR
 				   " (pref %d) not found in scan results",
@@ -501,8 +501,8 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 			continue;
 		}
 
-		if (bss->ssid_len != target->ssid_len ||
-		    os_memcmp(bss->ssid, target->ssid, bss->ssid_len) != 0) {
+		if (current_bss->ssid_len != target->ssid_len ||
+		    os_memcmp(current_bss->ssid, target->ssid, current_bss->ssid_len) != 0) {
 			/*
 			 * TODO: Could consider allowing transition to another
 			 * ESS if PMF was enabled for the association.
@@ -687,14 +687,15 @@ static void wnm_dump_cand_list(struct wpa_supplicant *wpa_s)
 {
 	unsigned int i;
 
-	wpa_printf(MSG_DEBUG, "WNM: BSS Transition Candidate List");
 	if (!wpa_s->wnm_neighbor_report_elements)
 		return;
+
+	wpa_printf(MSG_DEBUG, "WNM: BSS Transition Candidate List:");
 	for (i = 0; i < wpa_s->wnm_num_neighbor_report; i++) {
 		struct neighbor_report *nei;
 
 		nei = &wpa_s->wnm_neighbor_report_elements[i];
-		wpa_printf(MSG_DEBUG, "%u: " MACSTR
+		wpa_printf(MSG_DEBUG, "WNM:    %u: " MACSTR
 			   " info=0x%x op_class=%u chan=%u phy=%u pref=%d freq=%d",
 			   i, MAC2STR(nei->bssid), nei->bssid_info,
 			   nei->regulatory_class,
