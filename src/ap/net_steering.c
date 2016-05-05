@@ -48,7 +48,8 @@ static void flood_score(void *eloop_data, void *user_ctx);
 static void client_timeout(void *eloop_data, void *user_ctx);
 
 
-/* Use this so we can track additional data for stas and avoid adding more members to sta_info
+/*
+ * Use this so we can track additional data for stas and avoid adding more members to sta_info
  * It does mean that we need to be concerned about the lifetime of sta_info objects tracked
  * by hapd
  * Also, this struct is used to track stas we hear about from other APs via score messages
@@ -150,9 +151,9 @@ struct net_steering_client
 
 /* One context per bss */
 struct net_steering_bss {
-    /* supports a dl_list of net_steering_bss */
+	/* supports a dl_list of net_steering_bss */
 	struct dl_list list;
-    /* contains the list of clients */
+	/* contains the list of clients */
 	struct dl_list clients;
 	/* bss data structure */
 	struct hostapd_data *hapd;
@@ -261,6 +262,11 @@ static const u8* client_get_local_bssid(struct net_steering_client* client)
 static const u8* client_get_remote_bssid(struct net_steering_client* client)
 {
 	return client->remote_bssid;
+}
+
+Boolean client_supports_bss_transition(struct net_steering_client *client)
+{
+	return (client->sta->dot11MgmtOptionBSSTransitionActivated == 1);
 }
 
 static const u8* client_get_mac(struct net_steering_client* client)
@@ -556,11 +562,17 @@ static void flood_score(void *eloop_data, void *user_ctx)
 	put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score);
 	header_finalize(buf);
 
-	hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
+	if (client->score == max_score) {
+		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_DEBUG, "skip flooding "MACSTR" max score %d\n",
+			MAC2STR(client_get_mac(client)), client->score);
+	} else {
+		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d\n",
 			MAC2STR(client_get_mac(client)), client->score);
 
-	flood_message(nsb, buf);
+		flood_message(nsb, buf);
+	}
 	wpabuf_free(buf);
 	start_flood_timer(client);
 }
@@ -574,7 +586,7 @@ static void do_client_disassociate(struct net_steering_client* client)
 
 	if (client_is_associated(client))
 	{
-		if (client->nsb->mode == MODE_SUGGEST || client->sta->dot11MgmtOptionBSSTransitionActivated) {
+		if (client->nsb->mode == MODE_SUGGEST || client_supports_bss_transition(client)) {
 			hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_INFO, "Fast BSS transition for "MACSTR" to "MACSTR" on channel %d\n",
 				MAC2STR(client_get_mac(client)), MAC2STR(client_get_remote_bssid(client)), client->remote_channel);
@@ -801,6 +813,119 @@ SM_EVENT(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING)
 	client_stop_timer(sm);
 }
 
+
+/* 
+
+From original Alloy specification
+Old State	 Event			 New State
+--------------------------------------------------
+Idle,		 Associated,	 Associated
+Idle,		 PeerIsWorse,	 Confirming
+Idle,		 PeerNotWorse,	 Rejected
+Idle,		 PeerLostClient, Associating
+Idle,		 CloseClient,	 Rejected
+
+Confirming,	 ClosedClient,	 Associating
+Confirming,	 Associated,	 Associated
+Confirming,	 TimeOut,	     Idle
+Confirming,	 PeerIsWorse,	 Confirming
+Confirming,	 PeerNotWorse,	 Rejected
+
+Associating, Associated,	 Associated
+Associating, Disassociated,	 Idle
+Associating, PeerIsWorse,	 Associating
+Associating, CloseClient,	 Rejected
+
+Associated,	 CloseClient,	 Rejecting
+Associated,	 Disassociated,	 Idle
+Associated,	 PeerIsWorse,	 Associated
+Associated,	 Timer,          Associated
+
+Rejecting,	 CloseClient,	 Rejecting
+Rejecting,	 Disassociated,	 Rejected
+Rejecting,	 PeerIsWorse,	 Confirming
+Rejecting,	 PeerLostClient, Confirming
+Rejecting,	 TimeOut,        Associating
+
+Rejected,	 PeerIsWorse,    Confirming
+Rejected,	 PeerLostClient, Confirming
+Rejected,	 CloseClient,    Rejected
+Rejected,	 TimeOut,        Associating
+
+	-- NOTEs:
+	-- 1) The client is only blacklisted in Rejecting and Rejected.
+	-- 2) The Associated timer should fire immediately after transitioning to associated and then on an interval.
+	-- 3) The TimeOutEvent in Rejecting+Rejected fires if we haven't gotten a score recently.
+	-- 4) Events that don't match the above should be no-ops. Note that this does happen, for example if a MAP is in
+	-- Confirming and gets PeerIsWorsePacket it will send out CloseClientPacket which means it will get two 
+	-- ClosedClientPacket, one of which should be ignored.
+	-- 5) The fsm should pop into existence when a MAP links up with the client and go away after being inactive.
+*/
+
+/*
+Idle
+{
+	associated			Associated 		{}
+	peer_is_worse		Confirming 		{unicast_close_client();}
+	peer_not_worse		Rejected 		{blacklist();}
+	peer_lost_client	Associating 	{}
+	close_client		Rejected 		{unicast_closed_client(); blacklist();}
+	Default				Idle			{}
+}
+
+Confirming
+{
+	closed_client		Associating 	{}
+	associated			Associated 		{}
+	time_out			Idle 			{}
+	peer_is_worse		Confirming 		{unicast_close_client();}
+	peer_not_worse		Rejected 		{blacklist();}
+	Default				Confirming		{}
+}
+
+Associating
+{
+	associated			Associated 		{}
+	disassociated		Idle 			{}
+	peer_is_worse		Associating 	{unicast_close_client();}
+	close_client		Rejected 		{unicast_closed_client(); blacklist();}
+	Default				Associating		{}
+}
+
+Associated
+Entry {fast_flooding(); flood_score();}
+Exit  {slow_flooding();}
+{
+	close_client		Rejecting 		{blacklist(); disassociate(); clear_remotes();}
+	disassociated		Idle 			{flood_peer_lost_client();}
+	peer_is_worse		Associated 		{unicast_close_client();}
+	Default				Associated		{}
+}
+
+Rejecting
+Entry {start_timeout();}
+Exit  {stop_timeout();}
+{
+	close_client		Rejecting 		{}
+	disassociated		Rejected 		{unicast_closed_client();}
+	peer_is_worse		Confirming 		{unicast_close_client(); unblacklist();}
+	peer_lost_client	Confirming 		{unblacklist();}
+	time_out			Associating 	{unblacklist();}
+	Default				Rejecting		{}
+}
+
+Rejected
+Entry {start_timeout();}
+Exit  {stop_timeout();}
+{
+	peer_is_worse		Confirming 		{unicast_close_client(); unblacklist();}
+	peer_lost_client	Confirming 		{unblacklist();}
+	close_client		Rejected 		{unicast_closed_client();}
+	time_out			Associating 	{unblacklist();}
+	Default				Rejected		{}
+}
+*/
+
 SM_STEP_EVENT(STEERING)
 {
 	/* Not sure if this is needed other than the macros in state_machine.h need it. */
@@ -808,7 +933,7 @@ SM_STEP_EVENT(STEERING)
 
 	/* Define transitions for every event that has an action to perform */
 	/* Use no-ops for cases where only a state change is required */
-	/* Beware of states that have entry/exit criteria */
+	/* Beware of states that have entry/exit actions defined */
 	SM_TRANSITION(STEERING, IDLE, E_ASSOCIATED, ASSOCIATED);
 	SM_TRANSITION(STEERING, IDLE, E_PEER_IS_WORSE, CONFIRMING);
 	SM_TRANSITION(STEERING, IDLE, E_PEER_NOT_WORSE, REJECTED);
@@ -841,10 +966,10 @@ SM_STEP_EVENT(STEERING)
 	SM_TRANSITION(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING);
 
 	/* By design, the default response is no state change */
-	hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+	/*hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 		HOSTAPD_LEVEL_DEBUG,
 		"Client "MACSTR" default handler for %s - %s\n",
-		MAC2STR(sm->addr), state_to_str(sm->STEERING_state), event_to_str(event));
+		MAC2STR(sm->addr), state_to_str(sm->STEERING_state), event_to_str(event)); */
 }
 
 static void client_timeout(void *eloop_data, void *user_ctx)
@@ -873,6 +998,10 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 
 	/* update the remote bssid */
 	client_set_remote_bssid(client, bssid);
+
+	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_DEBUG, MACSTR" sent score for "MACSTR" %d local %d\n",
+			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, client->score);
 
 	/* if we hear a score better than ours, assume the STA has disassociated */
 	/* TODO include age to determine if we should disasssociate the client */
@@ -988,10 +1117,6 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 				return;
 			}
 			buf_pos += num_read;
-
-			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-					HOSTAPD_LEVEL_DEBUG, "Received score from "MACSTR" for "MACSTR" %d\n",
-					MAC2STR(bssid), MAC2STR(sta), score);
 
 			receive_score(nsb, sta, bssid, score);
 			break;
