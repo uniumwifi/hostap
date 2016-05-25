@@ -203,6 +203,22 @@ static void client_set_remote_bssid(struct net_steering_client* client, const u8
 	os_memcpy(client->remote_bssid, bssid, ETH_ALEN);
 }
 
+static const u8* client_get_remote_bssid(struct net_steering_client* client)
+{
+	return client->remote_bssid;
+}
+
+static const u8* client_get_local_bssid(struct net_steering_client* client)
+{
+	return client->nsb->hapd->conf->bssid;
+}
+
+static const u8* client_get_mac(struct net_steering_client* client)
+{
+	/* assumption is that this is always filled in from sta or via received tlv */
+	return client->addr;
+}
+
 static struct net_steering_client* client_create(struct net_steering_bss* nsb, const u8* addr)
 {
 	struct net_steering_client* client = (struct net_steering_client*) os_zalloc(sizeof(*client));
@@ -254,25 +270,10 @@ static void client_stop_timer(struct net_steering_client *client)
 	eloop_cancel_timeout(client_timeout, client, NULL);
 }
 
-static const u8* client_get_local_bssid(struct net_steering_client* client)
-{
-	return client->nsb->hapd->conf->bssid;
-}
-
-static const u8* client_get_remote_bssid(struct net_steering_client* client)
-{
-	return client->remote_bssid;
-}
 
 Boolean client_supports_bss_transition(struct net_steering_client *client)
 {
 	return (client->sta->dot11MgmtOptionBSSTransitionActivated == 1);
-}
-
-static const u8* client_get_mac(struct net_steering_client* client)
-{
-	/* assumption is that this is always filled in from sta or via received tlv */
-	return client->addr;
 }
 
 static void client_associate(struct net_steering_client* client, struct sta_info* sta)
@@ -504,10 +505,16 @@ static void flood_message(struct net_steering_bss* nsb, const struct wpabuf* buf
 
 			ret = l2_packet_send(nsb->control, dst, proto, wpabuf_head(buf), wpabuf_len(buf));
 			if (ret < 0) {
-				hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "Failed send to "MACSTR" : error %d\n",
 				MAC2STR(dst), ret);
 			}
+		} else {
+			/*
+			hostapd_logger(nsb->hapd, nsb->hapd->own_addr, HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_WARNING, "Don't send to myself "MACSTR"\n",
+			MAC2STR(nsb->hapd->own_addr));
+			*/
 		}
 		r0kh = r0kh->next;
 	}
@@ -520,12 +527,12 @@ static void flood_closed_client(struct net_steering_client *client)
 
 	buf = wpabuf_alloc(MAX_FRAME_SIZE);
 	header_put(buf, nsb->frame_sn++);
-	put_closed_client(buf, client_get_mac(client), nsb->hapd->conf->bssid);
+	put_closed_client(buf, client_get_mac(client), client_get_remote_bssid(client));
 	header_finalize(buf);
 
 	hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, "sending closed client "MACSTR"\n",
-			MAC2STR(client_get_mac(client)));
+			HOSTAPD_LEVEL_DEBUG, "sending closed client "MACSTR" to "MACSTR"\n",
+			MAC2STR(client_get_mac(client)), MAC2STR(client_get_remote_bssid(client)));
 
 	flood_message(nsb, buf);
 	wpabuf_free(buf);
@@ -557,11 +564,6 @@ static void flood_score(void *eloop_data, void *user_ctx)
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
 
-	buf = wpabuf_alloc(MAX_FRAME_SIZE);
-	header_put(buf, nsb->frame_sn++);
-	put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score);
-	header_finalize(buf);
-
 	if (client->score == max_score) {
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "skip flooding "MACSTR" max score %d\n",
@@ -571,9 +573,14 @@ static void flood_score(void *eloop_data, void *user_ctx)
 			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d\n",
 			MAC2STR(client_get_mac(client)), client->score);
 
+		buf = wpabuf_alloc(MAX_FRAME_SIZE);
+		header_put(buf, nsb->frame_sn++);
+		put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score);
+		header_finalize(buf);
+
 		flood_message(nsb, buf);
+		wpabuf_free(buf);
 	}
-	wpabuf_free(buf);
 	start_flood_timer(client);
 }
 
@@ -765,8 +772,8 @@ SM_EVENT(STEERING, ASSOCIATED, E_PEER_IS_WORSE, ASSOCIATED)
 SM_EVENT(STEERING, REJECTING, E_DISASSOCIATED, REJECTED)
 {
 	flood_closed_client(sm);
-	client_stop_timer(sm);
-	client_start_timer(sm);
+	client_stop_timer(sm); /* exiting REJECTING */
+	client_start_timer(sm); /* enter REJECTED */
 }
 
 SM_EVENT(STEERING, REJECTING, E_PEER_IS_WORSE, CONFIRMING)
@@ -966,10 +973,10 @@ SM_STEP_EVENT(STEERING)
 	SM_TRANSITION(STEERING, REJECTED, E_TIMEOUT, ASSOCIATING);
 
 	/* By design, the default response is no state change */
-	/*hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-		HOSTAPD_LEVEL_DEBUG,
+	hostapd_logger(sm->nsb->hapd, sm->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+		HOSTAPD_LEVEL_DEBUG_VERBOSE,
 		"Client "MACSTR" default handler for %s - %s\n",
-		MAC2STR(sm->addr), state_to_str(sm->STEERING_state), event_to_str(event)); */
+		MAC2STR(sm->addr), state_to_str(sm->STEERING_state), event_to_str(event));
 }
 
 static void client_timeout(void *eloop_data, void *user_ctx)
@@ -1004,9 +1011,7 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, client->score);
 
 	/* if we hear a score better than ours, assume the STA has disassociated */
-	/* TODO include age to determine if we should disasssociate the client */
 	if ((client->score > score) && client_is_associated(client)) {
-		do_client_disassociate(client);
 		SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
 	} else {
 		if (score == max_score) {
@@ -1024,12 +1029,17 @@ static void receive_close_client(struct net_steering_bss* nsb, const u8* sta,
 {
 	struct net_steering_client *client = NULL;
 
-	client = client_find(nsb, sta);
-	if (!client) {
-		return;
-	}
+	if (os_memcmp(nsb->hapd->conf->bssid, target_bssid, ETH_ALEN) == 0) {
 
-	if (os_memcmp(client_get_local_bssid(client), target_bssid, ETH_ALEN) == 0) {
+		client = client_find(nsb, sta);
+		if (!client) {
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+							HOSTAPD_LEVEL_DEBUG,
+							"Close client can't find client "MACSTR"\n",
+							MAC2STR(sta));
+			return;
+		}
+
 		client->remote_channel =  ap_channel;
 		client_set_remote_bssid(client, bssid);
 
@@ -1037,16 +1047,17 @@ static void receive_close_client(struct net_steering_bss* nsb, const u8* sta,
 	}
 }
 
-static void receive_closed_client(struct net_steering_bss* nsb, const u8* sta, const u8* bssid)
+static void receive_closed_client(struct net_steering_bss* nsb, const u8* sta, const u8* target_bssid)
 {
 	struct net_steering_client *client = NULL;
 
-	client = client_find(nsb, sta);
-	if (!client) {
-		return;
-	}
+ 	if (os_memcmp(nsb->hapd->conf->bssid, target_bssid, ETH_ALEN) == 0) {
 
- 	if (os_memcmp(client_get_local_bssid(client), bssid, ETH_ALEN) == 0) {
+		client = client_find(nsb, sta);
+		if (!client) {
+			return;
+		}
+
 		SM_STEP_EVENT_RUN(STEERING, E_CLOSED_CLIENT, client);
 	}
 }
@@ -1192,11 +1203,13 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 		if (os_memcmp(client_get_mac(client), sta->addr, ETH_ALEN) == 0) {
 
 			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-						HOSTAPD_LEVEL_INFO, MACSTR" disassociated from "MACSTR"\n",
-						MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid));
+						HOSTAPD_LEVEL_INFO, MACSTR" disassociated from "MACSTR" remote is "MACSTR"\n",
+						MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid),
+						MAC2STR(client_get_remote_bssid(client)));
 
-			client_disassociate(client);
 			SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
+			// DO NOT clean up until after the disassociate event has been processed
+			client_disassociate(client);
 			break;
 		}
 	}
