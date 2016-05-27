@@ -464,8 +464,8 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 
 		if (score != client->score) {
 			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, MACSTR" score is now %d\n",
-			MAC2STR(client_get_mac(client)), score);
+			HOSTAPD_LEVEL_DEBUG, "Probe request from "MACSTR" RSSI=%d\n",
+			MAC2STR(client_get_mac(client)), ssi_signal);
 		}
 		client->score = score;
 	}
