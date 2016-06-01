@@ -1537,9 +1537,6 @@ static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 		return 0;
 	}
 
-	if (wnm_scan_process(wpa_s) > 0)
-		goto scan_work_done;
-
 	if (sme_proc_obss_scan(wpa_s) > 0)
 		goto scan_work_done;
 
@@ -3606,6 +3603,15 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 				break;
 			}
 #endif /* CONFIG_IBSS_RSN */
+
+			if (stype == WLAN_FC_STYPE_PROBE_RESP) {
+				wpa_handle_probe_resp(
+					wpa_s, data->rx_mgmt.frame,
+					data->rx_mgmt.frame_len,
+					data->rx_mgmt.freq,
+					data->rx_mgmt.ssi_signal);
+				break;
+			}
 
 			if (stype == WLAN_FC_STYPE_ACTION) {
 				wpas_event_rx_mgmt_action(

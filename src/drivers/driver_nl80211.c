@@ -1824,6 +1824,11 @@ static int nl80211_mgmt_subscribe_non_ap(struct i802_bss *bss)
 		nl80211_register_frame(bss, bss->nl_mgmt, type, NULL, 0);
 	}
 
+	/* Probe Responses */
+	if(nl80211_register_frame(bss, bss->nl_mgmt, (WLAN_FC_TYPE_MGMT << 2) |
+			(WLAN_FC_STYPE_PROBE_RESP << 4), NULL, 0) < 0)
+		ret = -1;
+
 #ifdef CONFIG_INTERWORKING
 	/* QoS Map Configure */
 	if (nl80211_register_action_frame(bss, (u8 *) "\x01\x04", 2) < 0)
@@ -3134,6 +3139,14 @@ static int wpa_driver_nl80211_send_frame(struct i802_bss *bss,
 				   drv->send_action_cookie,
 				   (long long unsigned int) cookie);
 			drv->send_action_cookie = cookie;
+		} else if (WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT &&
+					WLAN_FC_GET_STYPE(fc) == WLAN_FC_STYPE_PROBE_REQ) {
+			wpa_printf(MSG_MSGDUMP,
+				   "nl80211: Update send_mgmt_cookie from 0x%llx to 0x%llx",
+				   (long long unsigned int)
+				   drv->send_action_cookie,
+				   (long long unsigned int) cookie);
+			drv->send_mgmt_cookie = cookie;
 		}
 	}
 
@@ -3204,6 +3217,11 @@ static int wpa_driver_nl80211_send_mlme(struct i802_bss *bss, const u8 *data,
 		u16 auth_trans = le_to_host16(mgmt->u.auth.auth_transaction);
 		if (auth_alg != WLAN_AUTH_SHARED_KEY || auth_trans != 3)
 			encrypt = 0;
+	}
+
+	if(WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT &&
+		WLAN_FC_GET_STYPE(fc) == WLAN_FC_STYPE_PROBE_REQ) {
+		encrypt = 0;
 	}
 
 	wpa_printf(MSG_DEBUG, "nl80211: send_mlme -> send_frame");

@@ -1575,7 +1575,7 @@ ifdef CONFIG_AUTHENTICATOR
 OBJS_wpa += tests/link_test.o
 endif
 OBJS_wpa += $(OBJS_l2)
-OBJS += wpa_supplicant.o events.o blacklist.o wpas_glue.o scan.o
+OBJS += wpa_supplicant.o events.o blacklist.o wpas_glue.o scan.o probe.o
 OBJS_t := $(OBJS) $(OBJS_l2) eapol_test.o
 OBJS_t += ../src/radius/radius_client.o
 OBJS_t += ../src/radius/radius.o

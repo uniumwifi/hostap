@@ -624,7 +624,7 @@ const char * wpa_supplicant_state_txt(enum wpa_states state)
 
 #ifdef CONFIG_BGSCAN
 
-static void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s)
+void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s)
 {
 	const char *name;
 
@@ -668,7 +668,7 @@ static void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s)
 }
 
 
-static void wpa_supplicant_stop_bgscan(struct wpa_supplicant *wpa_s)
+void wpa_supplicant_stop_bgscan(struct wpa_supplicant *wpa_s)
 {
 	if (wpa_s->bgscan_ssid != NULL) {
 		bgscan_deinit(wpa_s);

@@ -964,6 +964,13 @@ struct wpa_supplicant {
 	struct neighbor_report *wnm_neighbor_report_elements;
 	struct os_reltime wnm_cand_valid_until;
 	u8 wnm_cand_from_bss[ETH_ALEN];
+
+	/* wnm_best_neighbor should always point to the best neighbor in the wnm_neighbor_report_elements
+	 * list or be NULL. wnm_best_neigbor should never be freed */
+	struct neighbor_report *wnm_best_neighbor;
+	int wnm_best_neighbor_rssi;
+
+	u8 wnm_num_exp_probe_resp;
 #endif /* CONFIG_WNM */
 
 #ifdef CONFIG_TESTING_GET_GTK
@@ -1189,5 +1196,13 @@ void fst_wpa_supplicant_fill_iface_obj(struct wpa_supplicant *wpa_s,
 				       struct fst_wpa_obj *iface_obj);
 
 #endif /* CONFIG_FST */
+
+#ifdef CONFIG_BGSCAN
+
+void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s);
+void wpa_supplicant_stop_bgscan(struct wpa_supplicant *wpa_s);
+
+#endif /* CONFIG_BGSCAN */
+
 
 #endif /* WPA_SUPPLICANT_I_H */

@@ -589,13 +589,21 @@ static void mlme_event_mgmt_tx_status(struct wpa_driver_nl80211_data *drv,
 			return;
 
 		cookie_val = nla_get_u64(cookie);
-		wpa_printf(MSG_DEBUG, "nl80211: Action TX status:"
-			   " cookie=0%llx%s (ack=%d)",
-			   (long long unsigned int) cookie_val,
-			   cookie_val == drv->send_action_cookie ?
-			   " (match)" : " (unknown)", ack != NULL);
-		if (cookie_val != drv->send_action_cookie)
+
+		if(cookie_val == drv->send_action_cookie) {
+			wpa_printf(MSG_DEBUG, "nl80211: Action TX status:"
+			   " cookie=0%llx (match) (ack=%d)",
+			   (long long unsigned int) cookie_val, ack != NULL);
+		} else if (cookie_val == drv->send_mgmt_cookie) {
+			wpa_printf(MSG_DEBUG, "nl80211: mgmt TX status:"
+			   " cookie=0%llx (match) (ack=%d)",
+			   (long long unsigned int) cookie_val, ack != NULL);
+		} else {
+			wpa_printf(MSG_DEBUG, "nl80211: TX status:"
+			   " cookie=0%llx (unknown) (ack=%d)",
+			   (long long unsigned int) cookie_val, ack != NULL);
 			return;
+		}
 	}
 
 	hdr = (const struct ieee80211_hdr *) frame;
