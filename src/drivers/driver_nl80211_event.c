@@ -581,6 +581,9 @@ static void mlme_event_mgmt_tx_status(struct wpa_driver_nl80211_data *drv,
 	const struct ieee80211_hdr *hdr;
 	u16 fc;
 
+	hdr = (const struct ieee80211_hdr *) frame;
+	fc = le_to_host16(hdr->frame_control);
+
 	wpa_printf(MSG_DEBUG, "nl80211: Frame TX status event");
 	if (!is_ap_interface(drv->nlmode)) {
 		u64 cookie_val;
@@ -588,26 +591,24 @@ static void mlme_event_mgmt_tx_status(struct wpa_driver_nl80211_data *drv,
 		if (!cookie)
 			return;
 
-		cookie_val = nla_get_u64(cookie);
-
-		if(cookie_val == drv->send_action_cookie) {
-			wpa_printf(MSG_DEBUG, "nl80211: Action TX status:"
-			   " cookie=0%llx (match) (ack=%d)",
-			   (long long unsigned int) cookie_val, ack != NULL);
-		} else if (cookie_val == drv->send_mgmt_cookie) {
-			wpa_printf(MSG_DEBUG, "nl80211: mgmt TX status:"
-			   " cookie=0%llx (match) (ack=%d)",
-			   (long long unsigned int) cookie_val, ack != NULL);
+		if(WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT) {
+			if(WLAN_FC_GET_STYPE(fc) == WLAN_FC_STYPE_ACTION) {
+				cookie_val = nla_get_u64(cookie);
+				wpa_printf(MSG_DEBUG, "nl80211: Action TX status:"
+					   " cookie=0%llx%s (ack=%d)",
+					   (long long unsigned int) cookie_val,
+					   cookie_val == drv->send_action_cookie ?
+					   " (match)" : " (unknown)", ack != NULL);
+				if (cookie_val != drv->send_action_cookie){
+					return;
+				}
+			} else if (WLAN_FC_GET_STYPE(fc) != WLAN_FC_STYPE_PROBE_REQ) {
+				return;
+			}
 		} else {
-			wpa_printf(MSG_DEBUG, "nl80211: TX status:"
-			   " cookie=0%llx (unknown) (ack=%d)",
-			   (long long unsigned int) cookie_val, ack != NULL);
 			return;
 		}
 	}
-
-	hdr = (const struct ieee80211_hdr *) frame;
-	fc = le_to_host16(hdr->frame_control);
 
 	os_memset(&event, 0, sizeof(event));
 	event.tx_status.type = WLAN_FC_GET_TYPE(fc);

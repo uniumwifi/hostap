@@ -24,8 +24,9 @@
 #include "wnm_sta.h"
 
 #define MAX_TFS_IE_LEN  1024
-#define WNM_MAX_NEIGHBOR_REPORT 10
-#define WNM_PROBE_RESPONSE_TIMEOUT 1 //seconds
+#define WNM_PROBE_RESPONSE_TIMEOUT_SEC 0
+#define WNM_PROBE_RESPONSE_TIMEOUT_U_SEC 10000
+#define WNM_MAX_PROBE_REQS 3
 
 
 /* get the TFS IE from driver */
@@ -326,6 +327,7 @@ void wnm_deallocate_memory(struct wpa_supplicant *wpa_s)
 	// and therefore it shouldn't ever need to be freed
 	wpa_s->wnm_best_neighbor = NULL;
 	wpa_s->wnm_num_exp_probe_resp = 0;
+
 
 }
 
@@ -716,6 +718,14 @@ int wnm_connect_to_best_neighbor(struct wpa_supplicant* wpa_s)
 	return 0;
 
 abort_connection_attempt:
+	if (ret < 0 && wpa_s->wnm_reply) {
+		wpa_s->wnm_reply = 0;
+		wnm_send_bss_transition_mgmt_resp(wpa_s,
+						  wpa_s->wnm_dialog_token,
+						  WNM_BSS_TM_REJECT_NO_SUITABLE_CANDIDATES,
+						  0, NULL);
+	}
+
 	wpa_supplicant_start_bgscan(wpa_s);
 	wnm_deallocate_memory(wpa_s);
 	return ret;
@@ -746,12 +756,15 @@ int wnm_rx_directed_probe_response(struct wpa_supplicant* wpa_s,
 		return 0;
 
 	for(i = 0; wpa_s->wnm_neighbor_report_elements && i < wpa_s->wnm_num_neighbor_report; i++)	{
-		struct neighbor_report* rep = wpa_s->wnm_neighbor_report_elements + i;
+		struct neighbor_report* rep = &wpa_s->wnm_neighbor_report_elements[i];
 		if(memcmp(mgmt->bssid, rep->bssid, ETH_ALEN) == 0) {
 			wpa_printf(MSG_DEBUG, "WNM: Probe response from "MACSTR" with BSSID "MACSTR,
 								MAC2STR(mgmt->sa),MAC2STR(mgmt->bssid));
 
-			wpa_s->wnm_num_exp_probe_resp--;
+			if(wpa_s->wnm_rx_probe_resp_counts[i] == 0)
+				wpa_s->wnm_num_exp_probe_resp--;
+
+			wpa_s->wnm_rx_probe_resp_counts[i]++;
 
 			if((wpa_s->wnm_best_neighbor == NULL) ||
 			   (rep->preference > wpa_s->wnm_best_neighbor->preference) ||
@@ -760,6 +773,8 @@ int wnm_rx_directed_probe_response(struct wpa_supplicant* wpa_s,
 				wpa_s->wnm_best_neighbor = rep;
 				wpa_s->wnm_best_neighbor_rssi = rssi;
 			}
+
+			break;
 		}
 	}
 
@@ -774,16 +789,21 @@ int wnm_rx_directed_probe_response(struct wpa_supplicant* wpa_s,
 static void wnm_probe_neighbors(struct wpa_supplicant *wpa_s)
 {
 	int i;
-	struct neighbor_report *rep = wpa_s->wnm_neighbor_report_elements;
+	int j;
 
 	wpa_s->wnm_num_exp_probe_resp = wpa_s->wnm_num_neighbor_report;
+	os_memset(wpa_s->wnm_rx_probe_resp_counts, 0, WNM_MAX_NEIGHBOR_REPORT);
 
-	for(i = 0; rep && i < wpa_s->wnm_num_neighbor_report; i++) {
-		wpa_send_directed_probe_request(wpa_s, rep->bssid, rep->freq);
+	for(i = 0; wpa_s->wnm_neighbor_report_elements && i < wpa_s->wnm_num_neighbor_report; i++) {
+		struct neighbor_report* rep = &wpa_s->wnm_neighbor_report_elements[i];
+		for(j = 0; j < WNM_MAX_PROBE_REQS; j++) {
+			wpa_send_directed_probe_request(wpa_s, rep->bssid, rep->freq);
+		}
 	}
 
 	eloop_cancel_timeout(wnm_handle_direct_probe_timeout, wpa_s, NULL); //Clear any old timers
-	eloop_register_timeout(WNM_PROBE_RESPONSE_TIMEOUT, 0,
+	eloop_register_timeout(WNM_PROBE_RESPONSE_TIMEOUT_SEC,
+			WNM_PROBE_RESPONSE_TIMEOUT_U_SEC,
 			wnm_handle_direct_probe_timeout, wpa_s, NULL);
 
 }
@@ -895,7 +915,6 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 		wpa_s->wnm_cand_valid_until.sec +=
 			wpa_s->wnm_cand_valid_until.usec / 1000000;
 		wpa_s->wnm_cand_valid_until.usec %= 1000000;
-		os_memcpy(wpa_s->wnm_cand_from_bss, wpa_s->bssid, ETH_ALEN);
 
 		wnm_probe_neighbors(wpa_s);
 

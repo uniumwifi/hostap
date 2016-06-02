@@ -3139,14 +3139,6 @@ static int wpa_driver_nl80211_send_frame(struct i802_bss *bss,
 				   drv->send_action_cookie,
 				   (long long unsigned int) cookie);
 			drv->send_action_cookie = cookie;
-		} else if (WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT &&
-					WLAN_FC_GET_STYPE(fc) == WLAN_FC_STYPE_PROBE_REQ) {
-			wpa_printf(MSG_MSGDUMP,
-				   "nl80211: Update send_mgmt_cookie from 0x%llx to 0x%llx",
-				   (long long unsigned int)
-				   drv->send_action_cookie,
-				   (long long unsigned int) cookie);
-			drv->send_mgmt_cookie = cookie;
 		}
 	}
 

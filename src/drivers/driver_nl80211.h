@@ -151,7 +151,6 @@ struct wpa_driver_nl80211_data {
 
 	u64 remain_on_chan_cookie;
 	u64 send_action_cookie;
-	u64 send_mgmt_cookie;
 
 	unsigned int last_mgmt_freq;
 

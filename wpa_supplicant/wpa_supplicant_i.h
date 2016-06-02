@@ -955,6 +955,8 @@ struct wpa_supplicant {
 	u8 *mac_addr_pno;
 
 #ifdef CONFIG_WNM
+	#define WNM_MAX_NEIGHBOR_REPORT 10
+
 	u8 wnm_dialog_token;
 	u8 wnm_reply;
 	u8 wnm_num_neighbor_report;
@@ -963,7 +965,6 @@ struct wpa_supplicant {
 	u8 wnm_bss_termination_duration[12];
 	struct neighbor_report *wnm_neighbor_report_elements;
 	struct os_reltime wnm_cand_valid_until;
-	u8 wnm_cand_from_bss[ETH_ALEN];
 
 	/* wnm_best_neighbor should always point to the best neighbor in the wnm_neighbor_report_elements
 	 * list or be NULL. wnm_best_neigbor should never be freed */
@@ -971,6 +972,11 @@ struct wpa_supplicant {
 	int wnm_best_neighbor_rssi;
 
 	u8 wnm_num_exp_probe_resp;
+	/* Map of received probe responses from neighbors listed in the report
+	 * Each entry indicates the number of RX'd probe responses from the corresponding
+	 * neighbor with the same index in wnm_neighbor_report_elements
+	 */
+	u8 wnm_rx_probe_resp_counts[WNM_MAX_NEIGHBOR_REPORT];
 #endif /* CONFIG_WNM */
 
 #ifdef CONFIG_TESTING_GET_GTK
