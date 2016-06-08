@@ -324,7 +324,8 @@ static void ieee802_11_rx_bss_trans_mgmt_query(struct hostapd_data *hapd,
 	dialog_token = *pos++;
 	reason = *pos++;
 
-	wpa_printf(MSG_DEBUG, "WNM: BSS Transition Management Query from "
+	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+				   HOSTAPD_LEVEL_INFO,  "WNM: BSS Transition Management Query from "
 		   MACSTR " dialog_token=%u reason=%u",
 		   MAC2STR(addr), dialog_token, reason);
 
@@ -355,7 +356,8 @@ static void ieee802_11_rx_bss_trans_mgmt_resp(struct hostapd_data *hapd,
 	status_code = *pos++;
 	bss_termination_delay = *pos++;
 
-	wpa_printf(MSG_DEBUG, "WNM: BSS Transition Management Response from "
+	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			   HOSTAPD_LEVEL_INFO, "WNM: BSS Transition Management Response from "
 		   MACSTR " dialog_token=%u status_code=%u "
 		   "bss_termination_delay=%u", MAC2STR(addr), dialog_token,
 		   status_code, bss_termination_delay);
@@ -365,12 +367,8 @@ static void ieee802_11_rx_bss_trans_mgmt_resp(struct hostapd_data *hapd,
 			wpa_printf(MSG_DEBUG, "WNM: not enough room for Target BSSID field");
 			return;
 		}
-		wpa_printf(MSG_DEBUG, "WNM: Target BSSID: " MACSTR,
-			   MAC2STR(pos));
-		wpa_msg(hapd->msg_ctx, MSG_INFO, BSS_TM_RESP MACSTR
-			" status_code=%u bss_termination_delay=%u target_bssid="
-			MACSTR,
-			MAC2STR(addr), status_code, bss_termination_delay,
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_INFO,  "WNM: BSS Transition Accepted - target BSSID: " MACSTR,
 			MAC2STR(pos));
 
 		sta = ap_get_sta(hapd, addr);
@@ -398,6 +396,9 @@ static void ieee802_11_rx_bss_trans_mgmt_resp(struct hostapd_data *hapd,
 		mlme_disassociate_indication(hapd, sta, WLAN_REASON_DISASSOC_STA_HAS_LEFT);
 
 		pos += ETH_ALEN;
+	} else if (status_code == WNM_BSS_TM_REJECT_NO_SUITABLE_CANDIDATES) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+					   HOSTAPD_LEVEL_INFO,  "WNM: BSS Transition Rejected - No Suitable Candidates");
 	} else {
 		wpa_msg(hapd->msg_ctx, MSG_INFO, BSS_TM_RESP MACSTR
 			" status_code=%u bss_termination_delay=%u",
