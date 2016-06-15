@@ -25,7 +25,7 @@
 
 #define MAX_TFS_IE_LEN  1024
 #define WNM_PROBE_RESPONSE_TIMEOUT_SEC 0
-#define WNM_PROBE_RESPONSE_TIMEOUT_U_SEC 10000
+#define WNM_PROBE_RESPONSE_TIMEOUT_U_SEC 100000
 #define WNM_MAX_PROBE_REQS 3
 
 
@@ -726,7 +726,10 @@ abort_connection_attempt:
 						  0, NULL);
 	}
 
+#ifdef CONFIG_BGSCAN
 	wpa_supplicant_start_bgscan(wpa_s);
+#endif /* CONFIG_BGSCAN */
+
 	wnm_deallocate_memory(wpa_s);
 	return ret;
 
@@ -743,6 +746,7 @@ abort_connection_attempt:
 void wnm_handle_direct_probe_timeout(void *eloop_ctx, void *timeout_ctx)
 {
 	struct wpa_supplicant* wpa_s = eloop_ctx;
+	wpa_printf(MSG_INFO, "WNM: Direct probe response timeout");
 	wpa_s->wnm_num_exp_probe_resp = 0;
 	wnm_connect_to_best_neighbor(wpa_s);
 }
@@ -816,7 +820,10 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 	u8 valid_int;
 
 	wnm_deallocate_memory(wpa_s);
+
+#ifdef CONFIG_BGSCAN
 	wpa_supplicant_stop_bgscan(wpa_s);
+#endif /* CONFIG_BGSCAN */
 
 	if (pos + 5 > end)
 		return;
