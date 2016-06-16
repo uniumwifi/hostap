@@ -6,7 +6,7 @@ struct hostapd_data;
 
 int net_steering_init(struct hostapd_data *hapd);
 void net_steering_deinit(struct hostapd_data *hapd);
-void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta);
+void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, int rssi);
 void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta);
 
 

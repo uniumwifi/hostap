@@ -28,6 +28,7 @@ static const u8 tlv_version = 1;
 static const u16 max_score = -1;
 static const u32 flood_timeout_secs = 1;
 static const u32 client_timeout_secs = 10;
+static const u32 probe_timeout_secs = 34;
 static const char* mode_off = "off";
 static const char* mode_suggest = "suggest";
 static const char* mode_force = "force";
@@ -46,6 +47,7 @@ struct net_steering_client;
 struct net_steering_bss;
 static void flood_score(void *eloop_data, void *user_ctx);
 static void client_timeout(void *eloop_data, void *user_ctx);
+static void probe_timeout(void *eloop_data, void *user_ctx);
 
 
 /*
@@ -119,11 +121,11 @@ struct net_steering_client
 		 */
 		STEERING_E_PEER_LOST_CLIENT,
 		/*
-		 * The AP has been told to blacklist the client.
+		 * The AP has been told to blacklist/transition the client.
 		 */
 		STEERING_E_CLOSE_CLIENT,
 		/*
-		 * A remote AP has confirmed that it has blacklisted the client.
+		 * A remote AP has confirmed that it has blacklisted/transitioned the client.
 		 */
 		STEERING_E_CLOSED_CLIENT,
 		/*
@@ -135,7 +137,7 @@ struct net_steering_client
 	/* state machine support */
 	unsigned int changed;
 
-	/* The mac addr of the client */
+	/* The mac addr of the client. This is necessary since we may not have a sta_info for this client */
 	u8 addr[ETH_ALEN];
 
 	/*
@@ -221,6 +223,13 @@ static const u8* client_get_mac(struct net_steering_client* client)
 
 static struct net_steering_client* client_create(struct net_steering_bss* nsb, const u8* addr)
 {
+	assert(nsb->hapd->conf->bssid);
+	if (!nsb->hapd || !nsb->hapd->conf || !nsb->hapd->conf->bssid) {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "hapd pointers! are suspect %p\n",
+				nsb->hapd);
+	}
+
 	struct net_steering_client* client = (struct net_steering_client*) os_zalloc(sizeof(*client));
 	if (!client)
 	{
@@ -245,7 +254,7 @@ static void start_flood_timer(struct net_steering_client *client)
 	if (eloop_register_timeout(flood_timeout_secs, 0, flood_score, client, NULL)) {
 		hostapd_logger(client->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule flood\n",
-				MAC2STR(client->sta->addr));
+				MAC2STR(client_get_mac(client)));
 	}
 }
 
@@ -258,9 +267,18 @@ static void stop_flood_timer(struct net_steering_client *client)
 static void client_start_timer(struct net_steering_client *client)
 {
 	if (eloop_register_timeout(client_timeout_secs, 0, client_timeout, client, NULL)) {
-		hostapd_logger(client->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+		hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule timeout\n",
-				MAC2STR(client->sta->addr));
+				MAC2STR(client_get_mac(client)));
+	}
+}
+
+static void client_start_probe_timer(struct net_steering_client *client)
+{
+	if (eloop_register_timeout(probe_timeout_secs, 0, probe_timeout, client, NULL)) {
+		hostapd_logger(client->nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_WARNING, "client "MACSTR" failed to schedule probe timeout\n",
+				MAC2STR(client_get_mac(client)));
 	}
 }
 
@@ -270,6 +288,11 @@ static void client_stop_timer(struct net_steering_client *client)
 	eloop_cancel_timeout(client_timeout, client, NULL);
 }
 
+static void client_stop_probe_timer(struct net_steering_client *client)
+{
+	// It is safe if a timer is already canceled
+	eloop_cancel_timeout(probe_timeout, client, NULL);
+}
 
 Boolean client_supports_bss_transition(struct net_steering_client *client)
 {
@@ -297,6 +320,7 @@ static void client_delete(struct net_steering_client* client)
 {
 	stop_flood_timer(client);
 	client_stop_timer(client);
+	client_stop_probe_timer(client);
 
 	dl_list_del(&client->list);
 	os_memset(client, 0, sizeof(*client));
@@ -453,13 +477,22 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 		   const u8 *ie, size_t ie_len, int ssi_signal)
 {
 	struct net_steering_bss* nsb = ctx;
-	struct hostapd_data *hapd = nsb->hapd;
 	struct net_steering_client *client = NULL;
 
 	assert(nsb->hapd);
-
+	/* look up the client in our list */
 	client = client_find(nsb, sa);
-	if (client) {
+
+	/* if we found the client, or this probe is directed at this bss */
+	if (client || os_memcmp(nsb->hapd->conf->bssid, bssid, ETH_ALEN) == 0) {
+		if (!client) client = client_create(nsb, sa);
+		if (!client) {
+			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
+				HOSTAPD_LEVEL_INFO,
+				"Failed to create client for "MACSTR" on received probe\n",
+				MAC2STR(sa));
+			return 0;
+		}
 		u16 score = compute_score(ssi_signal);
 
 		if (score != client->score) {
@@ -468,8 +501,15 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 			MAC2STR(client_get_mac(client)), ssi_signal);
 		}
 		client->score = score;
-	}
 
+		/* set our timer for the next probe */
+		client_stop_probe_timer(client);
+		client_start_probe_timer(client);
+	} else {
+		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+			HOSTAPD_LEVEL_DEBUG, "Probe request from unknown "MACSTR" BSSID="MACSTR" RSSI=%d\n",
+			MAC2STR(sa), MAC2STR(bssid), ssi_signal);
+	}
 	return 0;
 }
 
@@ -987,6 +1027,19 @@ static void client_timeout(void *eloop_data, void *user_ctx)
 	SM_STEP_EVENT_RUN(STEERING, E_TIMEOUT, client);
 }
 
+static void probe_timeout(void *eloop_data, void *user_ctx)
+{
+	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
+
+	hostapd_logger(client->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
+					HOSTAPD_LEVEL_INFO,
+					"Probe timeout for client "MACSTR" score=%d\n",
+					MAC2STR(client_get_mac(client)), client->score);
+
+	// if the client is associated, do not invalidate the score
+	if (!client_is_associated(client)) client->score = max_score;
+}
+
 static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8* bssid, u16 score)
 {
 	struct net_steering_client *client = NULL;
@@ -1016,9 +1069,9 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 	} else {
 		if (score == max_score) {
 			SM_STEP_EVENT_RUN(STEERING, E_PEER_LOST_CLIENT, client);
-		} else if (score > client->score) {
+		} else if (client->score < score) {
 			SM_STEP_EVENT_RUN(STEERING, E_PEER_IS_WORSE, client);
-		} else if (client->score != max_score) {
+		} else {
 			SM_STEP_EVENT_RUN(STEERING, E_PEER_NOT_WORSE, client);
 		}
 	}
@@ -1215,7 +1268,7 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 	}
 }
 
-void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
+void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, int rssi)
 {
 	struct net_steering_bss* nsb = NULL;
 	struct net_steering_client* client = NULL;
@@ -1234,8 +1287,8 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 	}
 
 	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-				HOSTAPD_LEVEL_INFO, MACSTR" associated to "MACSTR"\n",
-				MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid));
+				HOSTAPD_LEVEL_INFO, MACSTR" associated to "MACSTR" signal=%d\n",
+				MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid), rssi);
 
 	if (sta->dot11MgmtOptionBSSTransitionActivated) {
 		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
@@ -1256,7 +1309,9 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta)
 		}
 	}
 
+	client->score = compute_score(rssi);
 	client_associate(client, sta);
+	client_start_probe_timer(client);
 	SM_STEP_EVENT_RUN(STEERING, E_ASSOCIATED, client);
 }
 
