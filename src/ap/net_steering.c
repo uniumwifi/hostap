@@ -67,7 +67,6 @@ struct net_steering_client
 	struct sta_info* sta;
 	struct net_steering_bss* nsb;
 	u16 score;
-	/* TODO how to handle wrap-around when the client stays associated  for longer than max_score seconds */
 	u16 score_age;
 
 	enum {
@@ -300,7 +299,7 @@ static void client_stop_probe_timer(struct net_steering_client *client)
 	eloop_cancel_timeout(probe_timeout, client, NULL);
 }
 
-Boolean client_supports_bss_transition(struct net_steering_client *client)
+static Boolean client_supports_bss_transition(struct net_steering_client *client)
 {
 	return (client->sta->dot11MgmtOptionBSSTransitionActivated == 1);
 }
@@ -612,8 +611,6 @@ static void flood_score(void *eloop_data, void *user_ctx)
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
 
-	client->score_age++;
-
 	if (client->score == max_score) {
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "skip flooding "MACSTR" max score %d\n",
@@ -631,6 +628,8 @@ static void flood_score(void *eloop_data, void *user_ctx)
 		flood_message(nsb, buf);
 		wpabuf_free(buf);
 	}
+	client->score_age++;
+
 	start_flood_timer(client);
 }
 
@@ -1087,7 +1086,7 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 		}
 	} else {
 		/* we don't care about age when the client is not associated */
-		/* scores are timed out by probe timer */
+		/* score ages are timed out by probe timer */
 		if (client->score < score) {
 			SM_STEP_EVENT_RUN(STEERING, E_PEER_IS_WORSE, client);
 		} else {
@@ -1332,6 +1331,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, i
 	client->score = compute_score(rssi);
 	client->score_age = 0;
 	client_associate(client, sta);
+	flood_score(client, NULL);
 	client_start_probe_timer(client);
 	SM_STEP_EVENT_RUN(STEERING, E_ASSOCIATED, client);
 }
