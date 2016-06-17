@@ -26,6 +26,7 @@ static const u16 proto = 0x8267; /* chosen at random from unassigned */
 static const u8 tlv_magic = 48;
 static const u8 tlv_version = 1;
 static const u16 max_score = -1;
+static const u16 max_score_age = -1;
 static const u32 flood_timeout_secs = 1;
 static const u32 client_timeout_secs = 10;
 static const u32 probe_timeout_secs = 34;
@@ -66,6 +67,8 @@ struct net_steering_client
 	struct sta_info* sta;
 	struct net_steering_bss* nsb;
 	u16 score;
+	/* TODO how to handle wrap-around when the client stays associated  for longer than max_score seconds */
+	u16 score_age;
 
 	enum {
         /*
@@ -241,6 +244,7 @@ static struct net_steering_client* client_create(struct net_steering_bss* nsb, c
 
 	client->nsb = nsb;
 	client->score = max_score;
+	client->score_age = max_score_age;
 	client->STEERING_state = STEERING_IDLE;
 	os_memcpy(client->addr, addr, ETH_ALEN);
 
@@ -260,6 +264,8 @@ static void start_flood_timer(struct net_steering_client *client)
 
 static void stop_flood_timer(struct net_steering_client *client)
 {
+	client->score = max_score;
+	client->score_age = max_score_age;
 	// It is safe if a timer is already canceled
 	eloop_cancel_timeout(flood_score, client, NULL);
 }
@@ -390,7 +396,7 @@ static size_t parse_tlv_header(const u8* buf, size_t len, u8* tlv_type, u8* tlv_
 	return tmp - buf;
 }
 
-static void put_score(struct wpabuf* buf, const u8* sta, const u8* bssid, u16 score)
+static void put_score(struct wpabuf* buf, const u8* sta, const u8* bssid, u16 score, u16 score_age)
 {
 	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(score);
 
@@ -399,6 +405,8 @@ static void put_score(struct wpabuf* buf, const u8* sta, const u8* bssid, u16 sc
 	wpabuf_put_data(buf, bssid, ETH_ALEN);
 	score = htons(score);
 	wpabuf_put_data(buf, &score, sizeof(score));
+	score_age = htons(score_age);
+	wpabuf_put_data(buf, &score_age, sizeof(score_age));
 }
 
 static void put_close_client(struct wpabuf* buf, const u8* sta, const u8* bssid, const u8* remote_bssid, u8 channel)
@@ -421,7 +429,7 @@ static void put_closed_client(struct wpabuf* buf, const u8* sta, const u8* bssid
 	wpabuf_put_data(buf, bssid, ETH_ALEN);
 }
 
-static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* score)
+static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* score, u16* score_age)
 {
 	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(*score);
 	const u8* tmp = buf;
@@ -435,6 +443,9 @@ static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* sc
 	os_memcpy(score, tmp, sizeof(*score));
 	*score = ntohs(*score);
 	tmp += sizeof(*score);
+	os_memcpy(score_age, tmp, sizeof(*score_age));
+	*score_age = ntohs(*score_age);
+	tmp += sizeof(*score_age);
 	return tmp - buf;
 }
 
@@ -500,15 +511,12 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 			HOSTAPD_LEVEL_DEBUG, "Probe request from "MACSTR" RSSI=%d\n",
 			MAC2STR(client_get_mac(client)), ssi_signal);
 		}
+		client->score_age = 0;
 		client->score = score;
 
 		/* set our timer for the next probe */
 		client_stop_probe_timer(client);
 		client_start_probe_timer(client);
-	} else {
-		hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, "Probe request from unknown "MACSTR" BSSID="MACSTR" RSSI=%d\n",
-			MAC2STR(sa), MAC2STR(bssid), ssi_signal);
 	}
 	return 0;
 }
@@ -604,18 +612,20 @@ static void flood_score(void *eloop_data, void *user_ctx)
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
 
+	client->score_age++;
+
 	if (client->score == max_score) {
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "skip flooding "MACSTR" max score %d\n",
 			MAC2STR(client_get_mac(client)), client->score);
 	} else {
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d\n",
-			MAC2STR(client_get_mac(client)), client->score);
+			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d age %d\n",
+			MAC2STR(client_get_mac(client)), client->score, client->score_age);
 
 		buf = wpabuf_alloc(MAX_FRAME_SIZE);
 		header_put(buf, nsb->frame_sn++);
-		put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score);
+		put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score, client->score_age);
 		header_finalize(buf);
 
 		flood_message(nsb, buf);
@@ -1040,7 +1050,7 @@ static void probe_timeout(void *eloop_data, void *user_ctx)
 	if (!client_is_associated(client)) client->score = max_score;
 }
 
-static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8* bssid, u16 score)
+static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8* bssid, u16 score, u16 score_age)
 {
 	struct net_steering_client *client = NULL;
 
@@ -1060,16 +1070,25 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 	client_set_remote_bssid(client, bssid);
 
 	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, MACSTR" sent score for "MACSTR" %d local %d\n",
-			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, client->score);
+			HOSTAPD_LEVEL_DEBUG, MACSTR" sent score for "MACSTR" %d %d local %d %d\n",
+			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, score_age, client->score, client->score_age);
 
-	/* if we hear a score better than ours, assume the STA has disassociated */
-	if ((client->score > score) && client_is_associated(client)) {
-		SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
+	/* if we think the client is associated */
+	if (client_is_associated(client)) {
+		/* check the age and score */
+		/* if the ages are tied, then compare scores. it does happen!*/
+		if ((client->score_age > score_age) ||
+		   ((client->score_age == score_age) && (client->score > score)))
+		{
+			/* some other AP has newer and better score, so we must have lost the client */
+			client->score = max_score;
+			client->score_age = max_score_age;
+			SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
+		}
 	} else {
-		if (score == max_score) {
-			SM_STEP_EVENT_RUN(STEERING, E_PEER_LOST_CLIENT, client);
-		} else if (client->score < score) {
+		/* we don't care about age when the client is not associated */
+		/* scores are timed out by probe timer */
+		if (client->score < score) {
 			SM_STEP_EVENT_RUN(STEERING, E_PEER_IS_WORSE, client);
 		} else {
 			SM_STEP_EVENT_RUN(STEERING, E_PEER_NOT_WORSE, client);
@@ -1122,6 +1141,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 	u8 magic, version, type_tlv, tlv_len = 0;
 	u16 packet_len = 0;
 	u16 score = 0;
+	u16 score_age = 0;
 	u8 sta[ETH_ALEN];
 	u8 bssid[ETH_ALEN];
 	u8 target_bssid[ETH_ALEN];
@@ -1173,7 +1193,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 		switch (type_tlv)
 		{
 		case TLV_SCORE:
-			num_read = parse_score(buf_pos, tlv_len, sta, bssid, &score);
+			num_read = parse_score(buf_pos, tlv_len, sta, bssid, &score, &score_age);
 			if (!num_read) {
 				hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 						HOSTAPD_LEVEL_DEBUG, "Could not parse score from "MACSTR"\n",
@@ -1182,7 +1202,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 			}
 			buf_pos += num_read;
 
-			receive_score(nsb, sta, bssid, score);
+			receive_score(nsb, sta, bssid, score, score_age);
 			break;
 		case TLV_CLOSE_CLIENT:
 			num_read = parse_close_client(buf_pos, tlv_len, sta, bssid, target_bssid, &ap_channel);
@@ -1310,6 +1330,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, i
 	}
 
 	client->score = compute_score(rssi);
+	client->score_age = 0;
 	client_associate(client, sta);
 	client_start_probe_timer(client);
 	SM_STEP_EVENT_RUN(STEERING, E_ASSOCIATED, client);
