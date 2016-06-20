@@ -509,6 +509,8 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "Probe request from "MACSTR" RSSI=%d\n",
 			MAC2STR(client_get_mac(client)), ssi_signal);
+			/* if client is associated, publish score changes immediately */
+			if (client_is_associated(client)) flood_score(client, NULL);
 		}
 		client->score_age = 0;
 		client->score = score;
