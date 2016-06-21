@@ -488,6 +488,7 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 {
 	struct net_steering_bss* nsb = ctx;
 	struct net_steering_client *client = NULL;
+	Boolean flood = FALSE;
 
 	assert(nsb->hapd);
 	/* look up the client in our list */
@@ -510,10 +511,13 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 			HOSTAPD_LEVEL_DEBUG, "Probe request from "MACSTR" RSSI=%d\n",
 			MAC2STR(client_get_mac(client)), ssi_signal);
 			/* if client is associated, publish score changes immediately */
-			if (client_is_associated(client)) flood_score(client, NULL);
+			flood = TRUE;
 		}
 		client->score_age = 0;
 		client->score = score;
+
+		/* don't flood until the score is updated */
+		if (flood && client_is_associated(client)) flood_score(client, NULL);
 
 		/* set our timer for the next probe */
 		client_stop_probe_timer(client);
