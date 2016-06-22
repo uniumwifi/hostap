@@ -46,6 +46,7 @@ enum {
 /* Pre decls */
 struct net_steering_client;
 struct net_steering_bss;
+static void do_flood_score(struct net_steering_client *client);
 static void flood_score(void *eloop_data, void *user_ctx);
 static void client_timeout(void *eloop_data, void *user_ctx);
 static void probe_timeout(void *eloop_data, void *user_ctx);
@@ -517,7 +518,7 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 		client->score = score;
 
 		/* don't flood until the score is updated */
-		if (flood && client_is_associated(client)) flood_score(client, NULL);
+		if (flood && client_is_associated(client)) do_flood_score(client);
 
 		/* set our timer for the next probe */
 		client_stop_probe_timer(client);
@@ -611,9 +612,8 @@ static void flood_close_client(struct net_steering_client *client)
 	wpabuf_free(buf);
 }
 
-static void flood_score(void *eloop_data, void *user_ctx)
+static void do_flood_score(struct net_steering_client *client)
 {
-	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
 
@@ -635,7 +635,12 @@ static void flood_score(void *eloop_data, void *user_ctx)
 		wpabuf_free(buf);
 	}
 	client->score_age++;
+}
 
+static void flood_score(void *eloop_data, void *user_ctx)
+{
+	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
+	do_flood_score(client);
 	start_flood_timer(client);
 }
 
@@ -1337,7 +1342,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, i
 	client->score = compute_score(rssi);
 	client->score_age = 0;
 	client_associate(client, sta);
-	flood_score(client, NULL);
+	do_flood_score(client);
 	client_start_probe_timer(client);
 	SM_STEP_EVENT_RUN(STEERING, E_ASSOCIATED, client);
 }
