@@ -32,7 +32,7 @@ static const u16 max_score = -1;
 
 static const u32 flood_timeout_secs = 1;
 static const u32 client_timeout_secs = 10;
-static const u32 probe_timeout_secs = 10;
+static const u32 probe_timeout_secs = 34;
 
 static const char* mode_off = "off";
 static const char* mode_suggest = "suggest";
