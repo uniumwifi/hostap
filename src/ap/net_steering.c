@@ -338,6 +338,9 @@ static void client_associate(struct net_steering_client* client, struct sta_info
 {
 	client->sta = sta;
 	os_memcpy(client->addr, client->sta->addr, ETH_ALEN);
+
+	/* now that the client is associated, cancel probe timer */
+	client_stop_probe_timer(client);
 }
 
 static void client_disassociate(struct net_steering_client* client)
