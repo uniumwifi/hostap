@@ -157,9 +157,14 @@ struct net_steering_client
 	u8 remote_bssid[ETH_ALEN];
 
 	/*
-	 * tracks the locally adjusted inactive timer for the remote ap that has the client associated
+	 * tracks the locally adjusted association timer for the remote ap that has the client associated
 	 */
 	struct os_time remote_time;
+
+	/*
+	 * tracks the time of association of the client
+	 */
+	struct os_time association_time;
 
 	/*
 	 * channel used for Fast BSS Transition
@@ -433,17 +438,17 @@ static size_t parse_tlv_header(const u8* buf, size_t len, u8* tlv_type, u8* tlv_
 	return tmp - buf;
 }
 
-static void put_score(struct wpabuf* buf, const u8* sta, const u8* bssid, u16 score, unsigned long inactive_msecs)
+static void put_score(struct wpabuf* buf, const u8* sta, const u8* bssid, u16 score, u32 association_msecs)
 {
-	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(score) + sizeof(inactive_msecs);
+	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(score) + sizeof(association_msecs);
 
 	put_tlv_header(buf, TLV_SCORE, score_len);
 	wpabuf_put_data(buf, sta, ETH_ALEN);
 	wpabuf_put_data(buf, bssid, ETH_ALEN);
 	score = htons(score);
 	wpabuf_put_data(buf, &score, sizeof(score));
-	inactive_msecs = htonl(inactive_msecs);
-	wpabuf_put_data(buf, &inactive_msecs, sizeof(inactive_msecs));
+	association_msecs = htonl(association_msecs);
+	wpabuf_put_data(buf, &association_msecs, sizeof(association_msecs));
 }
 
 static void put_close_client(struct wpabuf* buf, const u8* sta, const u8* bssid, const u8* remote_bssid, u8 channel)
@@ -466,9 +471,9 @@ static void put_closed_client(struct wpabuf* buf, const u8* sta, const u8* bssid
 	wpabuf_put_data(buf, bssid, ETH_ALEN);
 }
 
-static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* score, unsigned long* inactive_msecs)
+static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* score, u32* association_msecs)
 {
-	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(*score) + sizeof(*inactive_msecs);
+	static u8 score_len = ETH_ALEN + ETH_ALEN + sizeof(*score) + sizeof(*association_msecs);
 	const u8* tmp = buf;
 
 	if (len < score_len) return 0;
@@ -480,9 +485,9 @@ static size_t parse_score(const u8* buf, size_t len, u8* sta, u8* bssid, u16* sc
 	os_memcpy(score, tmp, sizeof(*score));
 	*score = ntohs(*score);
 	tmp += sizeof(*score);
-	os_memcpy(inactive_msecs, tmp, sizeof(*inactive_msecs));
-	*inactive_msecs = ntohl(*inactive_msecs);
-	tmp += sizeof(*inactive_msecs);
+	os_memcpy(association_msecs, tmp, sizeof(*association_msecs));
+	*association_msecs = ntohl(*association_msecs);
+	tmp += sizeof(*association_msecs);
 	return tmp - buf;
 }
 
@@ -655,36 +660,28 @@ static void do_flood_score(struct net_steering_client *client, Boolean on_associ
 {
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
-	struct hostap_sta_driver_data drv_data = {0};
-	int ret = 0;
 
 	if (client->score == max_score) {
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "skip flooding "MACSTR" max score %d\n",
 			MAC2STR(client_get_mac(client)), client->score);
 	} else {
+		struct os_time now_t;
+		struct os_time delta_t;
+		os_memset(&delta_t, 0, sizeof(delta_t));
 
-		ret = hostapd_drv_read_sta_data(client->nsb->hapd, &drv_data, client_get_mac(client));
-		if (ret || drv_data.inactive_msec < 0) {
-			if (on_associate) {
-				/* ignore failures if this is an association event */
-				drv_data.inactive_msec = 0;
-			} else {
-				hostapd_logger(client->nsb->hapd, client->nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
-					HOSTAPD_LEVEL_WARNING, "Failed to read sta data for "MACSTR" : error %d\n",
-					MAC2STR(client_get_mac(client)), ret);
-
-				return;
-			}
-		}
+		os_get_time(&now_t);
+		os_time_sub(&now_t, &client->association_time, &delta_t);
+		// TODO need to deal with wraparound, currently about 49 days
+		u32 associated_msecs = (delta_t.sec * 1000) + (delta_t.usec / 1000);
 
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
-			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d inactive %lu\n",
-			MAC2STR(client_get_mac(client)), client->score, drv_data.inactive_msec);
+			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d associated %lu\n",
+			MAC2STR(client_get_mac(client)), client->score, associated_msecs);
 
 		buf = wpabuf_alloc(MAX_FRAME_SIZE);
 		header_put(buf, nsb->frame_sn++);
-		put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score, drv_data.inactive_msec);
+		put_score(buf, client_get_mac(client), client_get_local_bssid(client), client->score, associated_msecs);
 		header_finalize(buf);
 
 		flood_message(nsb, buf);
@@ -1120,12 +1117,9 @@ static void compare_scores(struct net_steering_client *client, u16 score)
 }
 
 static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8* bssid,
-		u16 score, unsigned long inactive_msecs)
+		u16 score, u32 association_msecs)
 {
 	struct net_steering_client *client = NULL;
-	struct os_time now_r = {0};
-	struct os_time inactive_r = {0};
-	struct os_time corrected_r = {0};
 
 	client = client_find(nsb, sta);
 	if (!client) {
@@ -1141,7 +1135,7 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 
 	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, MACSTR" sent score for "MACSTR" %d %lu local %d\n",
-			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, inactive_msecs, client->score);
+			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, association_msecs, client->score);
 
 	/* we only care about scores when the client is not associated */
 	if (client_is_associated(client)) return;
@@ -1149,31 +1143,39 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 	/* if we receive a score from a new AP for this client */
 	/* Establish if the AP has newer information than the current one */
 	if (os_memcmp(bssid, client_get_remote_bssid(client), ETH_ALEN) != 0) {
-		os_get_time(&now_r);
-		inactive_r.sec = inactive_msecs / 1000;
-		inactive_r.usec = (inactive_msecs % 1000) * 1000;
+		struct os_time now_t;
+		struct os_time association_t;
+		struct os_time local_t;
+
+		os_memset(&now_t, 0, sizeof(now_t));
+		os_memset(&association_t, 0, sizeof(association_t));
+		os_memset(&local_t, 0, sizeof(local_t));
+
+		os_get_time(&now_t);
+
+		association_t.sec = association_msecs / 1000;
+		association_t.usec = (association_msecs % 1000) * 1000;
 
 		/*
-		 * Compute a local time that is corrected with inactive time from remote.
+		 * Compute a local time that is corrected with associated time from remote.
 		 * This allows us to determine the remote AP with the most recent information
 		 * regarding the client, and consequently which AP's scores should be evaluated.
 		 */
-		os_time_sub(&now_r, &inactive_r, &corrected_r);
+		os_time_sub(&now_t, &association_t, &local_t);
 
 		hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_DEBUG, MACSTR" current %ld %ld received %ld %ld\n",
-				MAC2STR(bssid), client->remote_time.sec, client->remote_time.usec, corrected_r.sec, corrected_r.usec);
-
+				MAC2STR(bssid), client->remote_time.sec, client->remote_time.usec, local_t.sec, local_t.usec);
 
 		/* should we switch which AP is believed to be associated with the client? */
-		/* only if remote time is before corrected time (giving us newer info) */
-		if (os_time_before(&client->remote_time, &corrected_r)) {
+		/* only if last remote time is before local time (giving us newer info) */
+		if (os_time_before(&client->remote_time, &local_t)) {
 			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 					HOSTAPD_LEVEL_INFO, MACSTR" is associated with client "MACSTR"\n",
 					MAC2STR(bssid), MAC2STR(client_get_mac(client)));
 
-			client->remote_time.sec = corrected_r.sec;
-			client->remote_time.usec = corrected_r.usec;
+			client->remote_time.sec = local_t.sec;
+			client->remote_time.usec = local_t.usec;
 			client_set_remote_bssid(client, bssid);
 			compare_scores(client, score);
 		}
@@ -1228,7 +1230,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 	u8 magic, version, type_tlv, tlv_len = 0;
 	u16 packet_len = 0;
 	u16 score = 0;
-	unsigned long inactive_msecs = 0;
+	u32 association_msecs = 0;
 	u8 sta[ETH_ALEN];
 	u8 bssid[ETH_ALEN];
 	u8 target_bssid[ETH_ALEN];
@@ -1280,7 +1282,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 		switch (type_tlv)
 		{
 		case TLV_SCORE:
-			num_read = parse_score(buf_pos, tlv_len, sta, bssid, &score, &inactive_msecs);
+			num_read = parse_score(buf_pos, tlv_len, sta, bssid, &score, &association_msecs);
 			if (!num_read) {
 				hostapd_logger(nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
 						HOSTAPD_LEVEL_DEBUG, "Could not parse score from "MACSTR"\n",
@@ -1289,7 +1291,7 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 			}
 			buf_pos += num_read;
 
-			receive_score(nsb, sta, bssid, score, inactive_msecs);
+			receive_score(nsb, sta, bssid, score, association_msecs);
 			break;
 		case TLV_CLOSE_CLIENT:
 			num_read = parse_close_client(buf_pos, tlv_len, sta, bssid, target_bssid, &ap_channel);
@@ -1419,6 +1421,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, i
 	os_memset(&client->remote_time, 0, sizeof(client->remote_time));
 	os_memset(&client->remote_bssid, 0, ETH_ALEN);
 
+	os_get_time(&client->association_time);
 	client->score = compute_score(rssi);
 	client_associate(client, sta);
 	do_flood_score(client, TRUE);
