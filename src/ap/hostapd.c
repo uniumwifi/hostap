@@ -42,6 +42,7 @@
 #include "x_snoop.h"
 #include "dhcp_snoop.h"
 #include "ndisc_snoop.h"
+#include "net_steering.h"
 
 
 static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
@@ -290,6 +291,10 @@ static void hostapd_free_hapd_data(struct hostapd_data *hapd)
 	radius_das_deinit(hapd->radius_das);
 	hapd->radius_das = NULL;
 #endif /* CONFIG_NO_RADIUS */
+
+#ifdef CONFIG_NET_STEERING
+	net_steering_deinit(hapd);
+#endif
 
 	hostapd_deinit_wps(hapd);
 
@@ -1076,6 +1081,13 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 		return -1;
 	}
 #endif /* CONFIG_INTERWORKING */
+
+#ifdef CONFIG_NET_STEERING
+	if (net_steering_init(hapd) < 0) {
+		wpa_printf(MSG_ERROR, "Failed to initialize net steering");
+		return -1;
+	}
+#endif /* CONFIG_NET_STEERING */
 
 	if (conf->bss_load_update_period && bss_load_update_init(hapd)) {
 		wpa_printf(MSG_ERROR, "BSS Load initialization failed");

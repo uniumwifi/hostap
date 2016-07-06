@@ -34,6 +34,7 @@
 #include "wnm_ap.h"
 #include "ndisc_snoop.h"
 #include "sta_info.h"
+#include "net_steering.h"
 
 #ifdef HOSTAPD
 #include "ap/steering.h"	/* for write_connect_timestamp() proto */
@@ -296,6 +297,10 @@ void ap_free_sta(struct hostapd_data *hapd, struct sta_info *sta)
 		os_free(sta->gas_dialog);
 	}
 #endif /* CONFIG_INTERWORKING */
+
+#ifdef CONFIG_NET_STEERING
+	net_steering_disassociation(hapd, sta);
+#endif  /* CONFIG_NET_STEERING */
 
 	wpabuf_free(sta->wps_ie);
 	wpabuf_free(sta->p2p_ie);

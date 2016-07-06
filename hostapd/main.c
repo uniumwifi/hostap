@@ -89,6 +89,9 @@ static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
 	case HOSTAPD_MODULE_MLME:
 		module_str = "MLME";
 		break;
+	case HOSTAPD_MODULE_NET_STEERING:
+		module_str = "STEER";
+		break;
 	default:
 		module_str = NULL;
 		break;
@@ -148,7 +151,7 @@ static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
 
 
 /**
- * hostapd_driver_init - Preparate driver interface
+ * hostapd_driver_init - Prepare driver interface
  */
 static int hostapd_driver_init(struct hostapd_iface *iface)
 {
@@ -709,6 +712,7 @@ int main(int argc, char *argv[])
 	}
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
 
+
 	interfaces.count = argc - optind;
 	if (interfaces.count || num_bss_configs) {
 		interfaces.iface = os_calloc(interfaces.count + num_bss_configs,
@@ -765,8 +769,10 @@ int main(int argc, char *argv[])
 		*fname++ = '\0';
 		iface = hostapd_interface_init_bss(&interfaces, bss_config[i],
 						   fname, debug);
-		if (iface == NULL)
+		if (iface == NULL) {
+			wpa_printf(MSG_ERROR, "Failed to init bss on %s", fname);
 			goto out;
+		}
 		for (j = 0; j < interfaces.count; j++) {
 			if (interfaces.iface[j] == iface)
 				break;
@@ -778,6 +784,7 @@ int main(int argc, char *argv[])
 					       sizeof(struct hostapd_iface *));
 			if (tmp == NULL) {
 				hostapd_interface_deinit_free(iface);
+				wpa_printf(MSG_ERROR, "Failed to alloc interface array");
 				goto out;
 			}
 			interfaces.iface = tmp;
@@ -801,8 +808,10 @@ int main(int argc, char *argv[])
 	interfaces.terminate_on_error = interfaces.count;
 	for (i = 0; i < interfaces.count; i++) {
 		if (hostapd_driver_init(interfaces.iface[i]) ||
-		    hostapd_setup_interface(interfaces.iface[i]))
+		    hostapd_setup_interface(interfaces.iface[i])) {
+			wpa_printf(MSG_ERROR, "Failed to setup interfaces");
 			goto out;
+		}
 	}
 
 	hostapd_global_ctrl_iface_init(&interfaces);

@@ -74,6 +74,11 @@ NEED_SHA1=y
 OBJS += ../src/drivers/drivers.o
 CFLAGS += -DHOSTAPD
 
+ifdef CONFIG_NET_STEERING
+CFLAGS += -DCONFIG_NET_STEERING
+OBJS += ../src/ap/net_steering.o
+endif
+
 ifdef CONFIG_MODULE_TESTS
 CFLAGS += -DCONFIG_MODULE_TESTS
 OBJS += hapd_module_tests.o
