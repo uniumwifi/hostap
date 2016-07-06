@@ -24,7 +24,6 @@
 #include "scan.h"
 #include "mesh.h"
 
-
 static void wpa_supplicant_gen_assoc_event(struct wpa_supplicant *wpa_s)
 {
 	struct wpa_ssid *ssid;

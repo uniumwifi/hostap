@@ -833,6 +833,7 @@ OBJS += ../src/ap/ap_drv_ops.o
 OBJS += ../src/ap/beacon.o
 OBJS += ../src/ap/bss_load.o
 OBJS += ../src/ap/eap_user_db.o
+OBJS += ../src/ap/sta_blacklist.o
 ifdef CONFIG_IEEE80211N
 OBJS += ../src/ap/ieee802_11_ht.o
 ifdef CONFIG_IEEE80211AC
@@ -1575,7 +1576,7 @@ ifdef CONFIG_AUTHENTICATOR
 OBJS_wpa += tests/link_test.o
 endif
 OBJS_wpa += $(OBJS_l2)
-OBJS += wpa_supplicant.o events.o blacklist.o wpas_glue.o scan.o
+OBJS += wpa_supplicant.o events.o blacklist.o wpas_glue.o scan.o probe.o
 OBJS_t := $(OBJS) $(OBJS_l2) eapol_test.o
 OBJS_t += ../src/radius/radius_client.o
 OBJS_t += ../src/radius/radius.o

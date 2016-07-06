@@ -16,13 +16,17 @@
 #include "wpa_supplicant_i.h"
 #include "driver_i.h"
 #include "scan.h"
+#include "bgscan.h"
 #include "ctrl_iface.h"
 #include "bss.h"
-#include "wnm_sta.h"
 #include "hs20_supplicant.h"
+#include "probe.h"
+#include "wnm_sta.h"
 
 #define MAX_TFS_IE_LEN  1024
-#define WNM_MAX_NEIGHBOR_REPORT 10
+#define WNM_PROBE_RESPONSE_TIMEOUT_SEC 0
+#define WNM_PROBE_RESPONSE_TIMEOUT_U_SEC 100000
+#define WNM_MAX_PROBE_REQS 3
 
 
 /* get the TFS IE from driver */
@@ -319,6 +323,12 @@ void wnm_deallocate_memory(struct wpa_supplicant *wpa_s)
 	wpa_s->wnm_num_neighbor_report = 0;
 	os_free(wpa_s->wnm_neighbor_report_elements);
 	wpa_s->wnm_neighbor_report_elements = NULL;
+	// wnm_best_neighbor should always point to a neighbor in wnm_neighbor_report_elements
+	// and therefore it shouldn't ever need to be freed
+	wpa_s->wnm_best_neighbor = NULL;
+	wpa_s->wnm_num_exp_probe_resp = 0;
+
+
 }
 
 
@@ -472,14 +482,14 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 {
 
 	u8 i;
-	struct wpa_bss *bss = wpa_s->current_bss;
+	struct wpa_bss *current_bss = wpa_s->current_bss;
 	struct wpa_bss *target;
 
-	if (!bss)
+	if (!current_bss)
 		return 0;
 
 	wpa_printf(MSG_DEBUG, "WNM: Current BSS " MACSTR " RSSI %d",
-		   MAC2STR(wpa_s->bssid), bss->level);
+		   MAC2STR(wpa_s->bssid), current_bss->level);
 
 	for (i = 0; i < wpa_s->wnm_num_neighbor_report; i++) {
 		struct neighbor_report *nei;
@@ -491,7 +501,7 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 			continue;
 		}
 
-		target = wpa_bss_get_bssid(wpa_s, nei->bssid);
+		target = wpa_bss_get(wpa_s, nei->bssid, current_bss->ssid, current_bss->ssid_len);
 		if (!target) {
 			wpa_printf(MSG_DEBUG, "Candidate BSS " MACSTR
 				   " (pref %d) not found in scan results",
@@ -501,8 +511,8 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 			continue;
 		}
 
-		if (bss->ssid_len != target->ssid_len ||
-		    os_memcmp(bss->ssid, target->ssid, bss->ssid_len) != 0) {
+		if (current_bss->ssid_len != target->ssid_len ||
+		    os_memcmp(current_bss->ssid, target->ssid, current_bss->ssid_len) != 0) {
 			/*
 			 * TODO: Could consider allowing transition to another
 			 * ESS if PMF was enabled for the association.
@@ -515,16 +525,6 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 			continue;
 		}
 
-		if (target->level < bss->level && target->level < -80) {
-			wpa_printf(MSG_DEBUG, "Candidate BSS " MACSTR
-				   " (pref %d) does not have sufficient signal level (%d)",
-				   MAC2STR(nei->bssid),
-				   nei->preference_present ? nei->preference :
-				   -1,
-				   target->level);
-			continue;
-		}
-
 		wpa_printf(MSG_DEBUG,
 			   "WNM: Found an acceptable preferred transition candidate BSS "
 			   MACSTR " (RSSI %d)",
@@ -534,7 +534,6 @@ compare_scan_neighbor_results(struct wpa_supplicant *wpa_s)
 
 	return NULL;
 }
-
 
 static void wnm_send_bss_transition_mgmt_resp(
 	struct wpa_supplicant *wpa_s, u8 dialog_token,
@@ -592,77 +591,6 @@ static void wnm_send_bss_transition_mgmt_resp(
 	}
 }
 
-
-int wnm_scan_process(struct wpa_supplicant *wpa_s, int reply_on_fail)
-{
-	struct wpa_bss *bss;
-	struct wpa_ssid *ssid = wpa_s->current_ssid;
-	enum bss_trans_mgmt_status_code status = WNM_BSS_TM_REJECT_UNSPECIFIED;
-
-	if (!wpa_s->wnm_neighbor_report_elements)
-		return 0;
-
-	if (os_reltime_before(&wpa_s->wnm_cand_valid_until,
-			      &wpa_s->scan_trigger_time)) {
-		wpa_printf(MSG_DEBUG, "WNM: Previously stored BSS transition candidate list is not valid anymore - drop it");
-		wnm_deallocate_memory(wpa_s);
-		return 0;
-	}
-
-	if (!wpa_s->current_bss ||
-	    os_memcmp(wpa_s->wnm_cand_from_bss, wpa_s->current_bss->bssid,
-		      ETH_ALEN) != 0) {
-		wpa_printf(MSG_DEBUG, "WNM: Stored BSS transition candidate list not from the current BSS - ignore it");
-		return 0;
-	}
-
-	/* Compare the Neighbor Report and scan results */
-	bss = compare_scan_neighbor_results(wpa_s);
-	if (!bss) {
-		wpa_printf(MSG_DEBUG, "WNM: No BSS transition candidate match found");
-		status = WNM_BSS_TM_REJECT_NO_SUITABLE_CANDIDATES;
-		goto send_bss_resp_fail;
-	}
-
-	/* Associate to the network */
-	/* Send the BSS Management Response - Accept */
-	if (wpa_s->wnm_reply) {
-		wpa_s->wnm_reply = 0;
-		wnm_send_bss_transition_mgmt_resp(wpa_s,
-						  wpa_s->wnm_dialog_token,
-						  WNM_BSS_TM_ACCEPT,
-						  0, bss->bssid);
-	}
-
-	if (bss == wpa_s->current_bss) {
-		wpa_printf(MSG_DEBUG,
-			   "WNM: Already associated with the preferred candidate");
-		return 1;
-	}
-
-	wpa_s->reassociate = 1;
-	wpa_supplicant_connect(wpa_s, bss, ssid);
-	wnm_deallocate_memory(wpa_s);
-	return 1;
-
-send_bss_resp_fail:
-	if (!reply_on_fail)
-		return 0;
-
-	/* Send reject response for all the failures */
-
-	if (wpa_s->wnm_reply) {
-		wpa_s->wnm_reply = 0;
-		wnm_send_bss_transition_mgmt_resp(wpa_s,
-						  wpa_s->wnm_dialog_token,
-						  status, 0, NULL);
-	}
-	wnm_deallocate_memory(wpa_s);
-
-	return 0;
-}
-
-
 static int cand_pref_compar(const void *a, const void *b)
 {
 	const struct neighbor_report *aa = a;
@@ -691,19 +619,19 @@ static void wnm_sort_cand_list(struct wpa_supplicant *wpa_s)
 	      cand_pref_compar);
 }
 
-
 static void wnm_dump_cand_list(struct wpa_supplicant *wpa_s)
 {
 	unsigned int i;
 
-	wpa_printf(MSG_DEBUG, "WNM: BSS Transition Candidate List");
 	if (!wpa_s->wnm_neighbor_report_elements)
 		return;
+
+	wpa_printf(MSG_DEBUG, "WNM: BSS Transition Candidate List (len=%d):", wpa_s->wnm_num_neighbor_report);
 	for (i = 0; i < wpa_s->wnm_num_neighbor_report; i++) {
 		struct neighbor_report *nei;
 
 		nei = &wpa_s->wnm_neighbor_report_elements[i];
-		wpa_printf(MSG_DEBUG, "%u: " MACSTR
+		wpa_printf(MSG_DEBUG, "WNM:    %u: " MACSTR
 			   " info=0x%x op_class=%u chan=%u phy=%u pref=%d freq=%d",
 			   i, MAC2STR(nei->bssid), nei->bssid_info,
 			   nei->regulatory_class,
@@ -713,75 +641,176 @@ static void wnm_dump_cand_list(struct wpa_supplicant *wpa_s)
 	}
 }
 
-
-static int chan_supported(struct wpa_supplicant *wpa_s, int freq)
+// Attempts to connect to wnm_best_neighbor
+int wnm_connect_to_best_neighbor(struct wpa_supplicant* wpa_s)
 {
-	unsigned int i;
+	struct wpa_bss* candidate;
+	struct wpa_bss* current_bss = wpa_s->current_bss;
+	int ret = 0;
 
-	for (i = 0; i < wpa_s->hw.num_modes; i++) {
-		struct hostapd_hw_modes *mode = &wpa_s->hw.modes[i];
-		int j;
+	if(wpa_s->wnm_best_neighbor == NULL){
+		ret = -1;
+		goto abort_connection_attempt;
+	}
 
-		for (j = 0; j < mode->num_channels; j++) {
-			struct hostapd_channel_data *chan;
 
-			chan = &mode->channels[j];
-			if (chan->freq == freq &&
-			    !(chan->flag & HOSTAPD_CHAN_DISABLED))
-				return 1;
+	if(current_bss == NULL){
+		ret = -1;
+		goto abort_connection_attempt;
+	}
+
+	wpa_printf(MSG_DEBUG, "WNM: Attempting to transition to BSSID "MACSTR,
+				MAC2STR(wpa_s->wnm_best_neighbor->bssid));
+
+	const u8* rsn_ie = wpa_bss_get_ie(current_bss, WLAN_EID_RSN);
+	if(rsn_ie == NULL){
+		ret = -1;
+		goto abort_connection_attempt;
+	}
+
+	u8 ie_len = rsn_ie[1];
+	candidate = os_zalloc(sizeof(struct wpa_bss) + 2 + ie_len);
+	if (candidate == NULL){
+		ret = -1;
+		goto abort_connection_attempt;
+	}
+
+	memcpy(candidate + 1, rsn_ie, 2 + ie_len);
+	candidate->ie_len = ie_len;
+
+	memcpy(candidate->bssid, wpa_s->wnm_best_neighbor->bssid, ETH_ALEN);
+	candidate->freq = wpa_s->wnm_best_neighbor->freq;
+	os_get_reltime(&candidate->last_update);
+	candidate->id = wpa_s->bss_next_id++;
+	wpa_s->bss_update_idx++;
+	candidate->last_update_idx = wpa_s->bss_update_idx;
+	memcpy(candidate->ssid, current_bss->ssid, current_bss->ssid_len);
+	candidate->ssid_len = current_bss->ssid_len;
+
+	dl_list_add_tail(&wpa_s->bss, &candidate->list);
+	dl_list_add_tail(&wpa_s->bss_id, &candidate->list_id);
+	wpa_s->num_bss++;
+	wpa_printf(MSG_DEBUG, "WNM: Add new wpa_bss with minimal "
+			"information for association: id %u BSSID "MACSTR" SSID '%s'",
+			candidate->id, MAC2STR(candidate->bssid), wpa_ssid_txt(candidate->ssid, candidate->ssid_len));
+	wpas_notify_bss_added(wpa_s, candidate->bssid, candidate->id);
+
+	/* Associate to the network */
+	/* Send the BSS Management Response - Accept */
+	if (wpa_s->wnm_reply) {
+		wpa_s->wnm_reply = 0;
+		wnm_send_bss_transition_mgmt_resp(wpa_s,
+						  wpa_s->wnm_dialog_token,
+						  WNM_BSS_TM_ACCEPT,
+						  0, candidate->bssid);
+	}
+
+	if (memcmp(candidate->bssid, current_bss->bssid, ETH_ALEN) == 0) {
+		wpa_printf(MSG_DEBUG, "WNM: Already associated with the preferred candidate");
+		ret = 0;
+		goto abort_connection_attempt;
+	}
+
+	wpa_s->reassociate = 1;
+	wpa_supplicant_connect(wpa_s, candidate, wpa_s->current_ssid);
+	wnm_deallocate_memory(wpa_s);
+
+	return 0;
+
+abort_connection_attempt:
+	if (ret < 0 && wpa_s->wnm_reply) {
+		wpa_s->wnm_reply = 0;
+		wnm_send_bss_transition_mgmt_resp(wpa_s,
+						  wpa_s->wnm_dialog_token,
+						  WNM_BSS_TM_REJECT_NO_SUITABLE_CANDIDATES,
+						  0, NULL);
+	}
+
+#ifdef CONFIG_BGSCAN
+	wpa_supplicant_start_bgscan(wpa_s);
+#endif /* CONFIG_BGSCAN */
+
+	wnm_deallocate_memory(wpa_s);
+	return ret;
+
+}
+
+/**
+ * wnm_handle_direct_probe_timeout - Timer for direct probe responses
+ * @eloop_ctx: struct wpa_supplicant *
+ * @timeout_ctx: NULL
+ *
+ * This function is called if we haven't received the expected number
+ * of probe responses within WNM_PROBE_RESPONSE_TIMEOUT
+ */
+void wnm_handle_direct_probe_timeout(void *eloop_ctx, void *timeout_ctx)
+{
+	struct wpa_supplicant* wpa_s = eloop_ctx;
+	wpa_printf(MSG_INFO, "WNM: Direct probe response timeout");
+	wpa_s->wnm_num_exp_probe_resp = 0;
+	wnm_connect_to_best_neighbor(wpa_s);
+}
+
+int wnm_rx_directed_probe_response(struct wpa_supplicant* wpa_s,
+		const struct ieee80211_mgmt* mgmt, int freq, int rssi)
+{
+	int i;
+
+	if(wpa_s->wnm_num_exp_probe_resp == 0)
+		return 0;
+
+	for(i = 0; wpa_s->wnm_neighbor_report_elements && i < wpa_s->wnm_num_neighbor_report; i++)	{
+		struct neighbor_report* rep = &wpa_s->wnm_neighbor_report_elements[i];
+		if(memcmp(mgmt->bssid, rep->bssid, ETH_ALEN) == 0) {
+			wpa_printf(MSG_DEBUG, "WNM: Probe response from "MACSTR" with BSSID "MACSTR,
+								MAC2STR(mgmt->sa),MAC2STR(mgmt->bssid));
+
+			if(wpa_s->wnm_rx_probe_resp_counts[i] == 0)
+				wpa_s->wnm_num_exp_probe_resp--;
+
+			wpa_s->wnm_rx_probe_resp_counts[i]++;
+
+			if((wpa_s->wnm_best_neighbor == NULL) ||
+			   (rep->preference > wpa_s->wnm_best_neighbor->preference) ||
+			   ((rep->preference == wpa_s->wnm_best_neighbor->preference && rssi > wpa_s->wnm_best_neighbor_rssi)))
+			{
+				wpa_s->wnm_best_neighbor = rep;
+				wpa_s->wnm_best_neighbor_rssi = rssi;
+			}
+
+			break;
 		}
+	}
+
+	if(wpa_s->wnm_num_exp_probe_resp == 0) {
+		eloop_cancel_timeout(wnm_handle_direct_probe_timeout, wpa_s, NULL);
+		wnm_connect_to_best_neighbor(wpa_s);
 	}
 
 	return 0;
 }
 
-
-static void wnm_set_scan_freqs(struct wpa_supplicant *wpa_s)
+static void wnm_probe_neighbors(struct wpa_supplicant *wpa_s)
 {
-	int *freqs;
-	int num_freqs = 0;
-	unsigned int i;
+	int i;
+	int j;
 
-	if (!wpa_s->wnm_neighbor_report_elements)
-		return;
+	wpa_s->wnm_num_exp_probe_resp = wpa_s->wnm_num_neighbor_report;
+	os_memset(wpa_s->wnm_rx_probe_resp_counts, 0, WNM_MAX_NEIGHBOR_REPORT);
 
-	if (wpa_s->hw.modes == NULL)
-		return;
-
-	os_free(wpa_s->next_scan_freqs);
-	wpa_s->next_scan_freqs = NULL;
-
-	freqs = os_calloc(wpa_s->wnm_num_neighbor_report + 1, sizeof(int));
-	if (freqs == NULL)
-		return;
-
-	for (i = 0; i < wpa_s->wnm_num_neighbor_report; i++) {
-		struct neighbor_report *nei;
-
-		nei = &wpa_s->wnm_neighbor_report_elements[i];
-		if (nei->freq <= 0) {
-			wpa_printf(MSG_DEBUG,
-				   "WNM: Unknown neighbor operating frequency for "
-				   MACSTR " - scan all channels",
-				   MAC2STR(nei->bssid));
-			os_free(freqs);
-			return;
+	for(i = 0; wpa_s->wnm_neighbor_report_elements && i < wpa_s->wnm_num_neighbor_report; i++) {
+		struct neighbor_report* rep = &wpa_s->wnm_neighbor_report_elements[i];
+		for(j = 0; j < WNM_MAX_PROBE_REQS; j++) {
+			wpa_send_directed_probe_request(wpa_s, rep->bssid, rep->freq);
 		}
-		if (chan_supported(wpa_s, nei->freq))
-			add_freq(freqs, &num_freqs, nei->freq);
 	}
 
-	if (num_freqs == 0) {
-		os_free(freqs);
-		return;
-	}
+	eloop_cancel_timeout(wnm_handle_direct_probe_timeout, wpa_s, NULL); //Clear any old timers
+	eloop_register_timeout(WNM_PROBE_RESPONSE_TIMEOUT_SEC,
+			WNM_PROBE_RESPONSE_TIMEOUT_U_SEC,
+			wnm_handle_direct_probe_timeout, wpa_s, NULL);
 
-	wpa_printf(MSG_DEBUG,
-		   "WNM: Scan %d frequencies based on transition candidate list",
-		   num_freqs);
-	wpa_s->next_scan_freqs = freqs;
 }
-
 
 static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 					     const u8 *pos, const u8 *end,
@@ -789,6 +818,12 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 {
 	unsigned int beacon_int;
 	u8 valid_int;
+
+	wnm_deallocate_memory(wpa_s);
+
+#ifdef CONFIG_BGSCAN
+	wpa_supplicant_stop_bgscan(wpa_s);
+#endif /* CONFIG_BGSCAN */
 
 	if (pos + 5 > end)
 		return;
@@ -841,12 +876,6 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 	if (wpa_s->wnm_mode & WNM_BSS_TM_REQ_DISASSOC_IMMINENT) {
 		wpa_msg(wpa_s, MSG_INFO, "WNM: Disassociation Imminent - "
 			"Disassociation Timer %u", wpa_s->wnm_dissoc_timer);
-		if (wpa_s->wnm_dissoc_timer && !wpa_s->scanning) {
-			/* TODO: mark current BSS less preferred for
-			 * selection */
-			wpa_printf(MSG_DEBUG, "Trying to find another BSS");
-			wpa_supplicant_req_scan(wpa_s, 0, 0);
-		}
 	}
 
 	if (wpa_s->wnm_mode & WNM_BSS_TM_REQ_PREF_CAND_LIST_INCLUDED) {
@@ -885,7 +914,7 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 		wnm_sort_cand_list(wpa_s);
 		wnm_dump_cand_list(wpa_s);
 		valid_ms = valid_int * beacon_int * 128 / 125;
-		wpa_printf(MSG_DEBUG, "WNM: Candidate list valid for %u ms",
+		wpa_printf(MSG_MSGDUMP, "WNM: Candidate list valid for %u ms",
 			   valid_ms);
 		os_get_reltime(&wpa_s->wnm_cand_valid_until);
 		wpa_s->wnm_cand_valid_until.sec += valid_ms / 1000;
@@ -893,24 +922,9 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 		wpa_s->wnm_cand_valid_until.sec +=
 			wpa_s->wnm_cand_valid_until.usec / 1000000;
 		wpa_s->wnm_cand_valid_until.usec %= 1000000;
-		os_memcpy(wpa_s->wnm_cand_from_bss, wpa_s->bssid, ETH_ALEN);
 
-		if (wpa_s->last_scan_res_used > 0) {
-			struct os_reltime now;
+		wnm_probe_neighbors(wpa_s);
 
-			os_get_reltime(&now);
-			if (!os_reltime_expired(&now, &wpa_s->last_scan, 10)) {
-				wpa_printf(MSG_DEBUG,
-					   "WNM: Try to use recent scan results");
-				if (wnm_scan_process(wpa_s, 0) > 0)
-					return;
-				wpa_printf(MSG_DEBUG,
-					   "WNM: No match in previous scan results - try a new scan");
-			}
-		}
-
-		wnm_set_scan_freqs(wpa_s);
-		wpa_supplicant_req_scan(wpa_s, 0, 0);
 	} else if (reply) {
 		enum bss_trans_mgmt_status_code status;
 		if (wpa_s->wnm_mode & WNM_BSS_TM_REQ_ESS_DISASSOC_IMMINENT)
@@ -922,6 +936,7 @@ static void ieee802_11_rx_bss_trans_mgmt_req(struct wpa_supplicant *wpa_s,
 		wnm_send_bss_transition_mgmt_resp(wpa_s,
 						  wpa_s->wnm_dialog_token,
 						  status, 0, NULL);
+		wnm_deallocate_memory(wpa_s);
 	}
 }
 
