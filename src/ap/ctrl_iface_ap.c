@@ -22,7 +22,7 @@
 #include "p2p_hostapd.h"
 #include "ctrl_iface_ap.h"
 #include "ap_drv_ops.h"
-
+#include "sta_blacklist.h"
 
 static int hostapd_get_sta_tx_rx(struct hostapd_data *hapd,
 				 struct sta_info *sta,
@@ -509,6 +509,69 @@ int hostapd_ctrl_iface_status(struct hostapd_data *hapd, char *buf,
 	return len;
 }
 
+int hostapd_ctrl_iface_blacklist_add(struct hostapd_data *hapd,
+					const char *txtaddr)
+{
+	u8 addr[ETH_ALEN];
+	int ret = -1;
+
+	wpa_dbg(hapd->msg_ctx, MSG_DEBUG, "CTRL_IFACE BLACKLIST_ADD %s",
+		txtaddr);
+
+	if (hwaddr_aton(txtaddr, addr))
+		return -1;
+
+	ret = sta_blacklist_add(hapd, addr);
+
+	return ret;
+}
+
+int hostapd_ctrl_iface_blacklist_rm(struct hostapd_data *hapd,
+					const char *txtaddr)
+{
+	u8 addr[ETH_ALEN];
+	int ret = -1;
+
+	wpa_dbg(hapd->msg_ctx, MSG_DEBUG, "CTRL_IFACE BLACKLIST_RM %s",
+		txtaddr);
+
+	if (hwaddr_aton(txtaddr, addr))
+		return -1;
+
+	ret = sta_blacklist_rm(hapd, addr);
+
+	return ret;
+}
+
+int hostapd_ctrl_iface_blacklist_show(struct hostapd_data *hapd, char *buf,
+		size_t buflen)
+{
+	int len = 0, ret = 0;
+	struct sta_blacklist *e = hapd->blacklist;
+
+	while (e) {
+		ret = os_snprintf(buf + len, buflen - len,
+				  MACSTR "\n",
+				  MAC2STR(e->sta));
+		if (ret < 0 || (size_t) ret >= buflen - len)
+			return len;
+		len += ret;
+		e = e->next;
+	}
+
+	return ret;
+}
+
+int hostapd_ctrl_iface_blacklist_clr(struct hostapd_data *hapd)
+{
+	int ret = -1;
+
+	wpa_dbg(hapd->msg_ctx, MSG_DEBUG, "CTRL_IFACE BLACKLIST_CLR");
+
+	ret = sta_blacklist_clear(hapd);
+
+	return ret;
+}
 
 int hostapd_parse_csa_settings(const char *pos,
 			       struct csa_settings *settings)

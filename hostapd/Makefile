@@ -63,6 +63,7 @@ OBJS += ../src/ap/pmksa_cache_auth.o
 OBJS += ../src/ap/ieee802_11_shared.o
 OBJS += ../src/ap/beacon.o
 OBJS += ../src/ap/bss_load.o
+OBJS += ../src/ap/sta_blacklist.o
 
 OBJS_c = hostapd_cli.o ../src/common/wpa_ctrl.o ../src/utils/os_$(CONFIG_OS).o
 
