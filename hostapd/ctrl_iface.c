@@ -1074,6 +1074,65 @@ static int hostapd_ctrl_iface_bss_tm_req(struct hostapd_data *hapd,
 	return ret;
 }
 
+static int hostapd_ctrl_iface_bss_transition(struct hostapd_data *hapd,
+					   const char *cmd)
+{
+	u8 addr[ETH_ALEN];
+	u8 ap_addr[ETH_ALEN];
+	const char *timerstr, *apstr, *channelstr;
+	int disassoc_timer;
+	u8 dest_ap_channel;
+	struct sta_info *sta;
+
+	if (hwaddr_aton(cmd, addr))
+		return -1;
+
+	sta = ap_get_sta(hapd, addr);
+	if (sta == NULL) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_WARNING, " not found for BSS transition message");
+
+		//wpa_printf(MSG_DEBUG, "Station " MACSTR
+		//	   " not found for BSS transition message",
+		//	   MAC2STR(addr));
+		return -1;
+	}
+
+	timerstr = cmd + 17;
+	if (*timerstr != ' ') {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_WARNING, "time not found");
+		return -1;
+	}
+	timerstr++; // skip the space
+	disassoc_timer = atoi(timerstr);
+	if (disassoc_timer < 0 || disassoc_timer > 65535) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_WARNING, "time out of range");
+		return -1;
+	}
+
+	apstr = os_strchr(timerstr, ' ');
+	if (apstr == NULL) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_WARNING, "dest AP not found");
+		return -1;
+	}
+	apstr++; // skip the space
+	if (hwaddr_aton(apstr, ap_addr)) {
+		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+			HOSTAPD_LEVEL_WARNING, "dest AP couldn't be decoded");
+		return -1;
+	}
+
+	channelstr = os_strchr(apstr, ' ');
+	channelstr++; // skip the space
+	sscanf(channelstr, "%hhu", &dest_ap_channel); // C99 way of reading in an unsigned char
+	//dest_ap_channel = atoi(channelstr);
+
+	return wnm_send_bss_tm_req2(hapd, sta, disassoc_timer, ap_addr, dest_ap_channel);
+}
+
 #endif /* CONFIG_WNM */
 
 
@@ -2214,6 +2273,9 @@ static int hostapd_ctrl_iface_receive_process(struct hostapd_data *hapd,
 			reply_len = -1;
 	} else if (os_strncmp(buf, "BSS_TM_REQ ", 11) == 0) {
 		if (hostapd_ctrl_iface_bss_tm_req(hapd, buf + 11))
+			reply_len = -1;
+	} else if (os_strncmp(buf, "BSS_TRANSITION ", 15) == 0) {
+		if (hostapd_ctrl_iface_bss_transition(hapd, buf + 15))
 			reply_len = -1;
 #endif /* CONFIG_WNM */
 	} else if (os_strcmp(buf, "GET_CONFIG") == 0) {
