@@ -50,7 +50,7 @@ enum {
 /* Pre decls */
 struct net_steering_client;
 struct net_steering_bss;
-static void do_flood_score(struct net_steering_client *client, Boolean on_associate);
+static void do_flood_score(struct net_steering_client *client);
 static void flood_score(void *eloop_data, void *user_ctx);
 static void client_timeout(void *eloop_data, void *user_ctx);
 static void probe_timeout(void *eloop_data, void *user_ctx);
@@ -203,6 +203,7 @@ static const char* state_to_str(int state)
 	case STEERING_ASSOCIATED: return "ASSOCIATED";
 	case STEERING_REJECTING: return "REJECTING";
 	case STEERING_REJECTED: return "REJECTED";
+	default: return "UNKNOWN";
 	}
 }
 
@@ -217,6 +218,7 @@ static const char* event_to_str(int event)
 	case STEERING_E_CLOSE_CLIENT: return "E_CLOSE_CLIENT";
 	case STEERING_E_CLOSED_CLIENT: return "E_CLOSED_CLIENT";
 	case STEERING_E_TIMEOUT: return "E_TIMEOUT";
+	default: return "UNKNOWN";
 	}
 }
 
@@ -425,7 +427,7 @@ static void put_tlv_header(struct wpabuf* buf, u8 tlv_type, u8 tlv_len)
 
 static size_t parse_tlv_header(const u8* buf, size_t len, u8* tlv_type, u8* tlv_len)
 {
-	static const header_len = sizeof(*tlv_type) + sizeof(*tlv_len);
+	static const size_t header_len = sizeof(*tlv_type) + sizeof(*tlv_len);
 	const u8* tmp = buf;
 	if (len < header_len) return 0;
 
@@ -529,6 +531,11 @@ static size_t parse_closed_client(const u8* buf, size_t len, u8* sta, u8* target
 int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 		   const u8 *ie, size_t ie_len, int ssi_signal)
 {
+	/* unused */
+	(void) da;
+	(void) ie;
+	(void) ie_len;
+
 	struct net_steering_bss* nsb = ctx;
 	struct net_steering_client *client = NULL;
 
@@ -556,7 +563,7 @@ int probe_req_cb(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
 			client->score = score;
 
 			/* don't flood until the score is updated */
-			if (client_is_associated(client)) do_flood_score(client, FALSE);
+			if (client_is_associated(client)) do_flood_score(client);
 		}
 
 		if (!client_is_associated(client)) {
@@ -656,7 +663,7 @@ static void flood_close_client(struct net_steering_client *client)
 	wpabuf_free(buf);
 }
 
-static void do_flood_score(struct net_steering_client *client, Boolean on_associate)
+static void do_flood_score(struct net_steering_client *client)
 {
 	struct net_steering_bss* nsb = client->nsb;
 	struct wpabuf* buf;
@@ -677,7 +684,7 @@ static void do_flood_score(struct net_steering_client *client, Boolean on_associ
 
 		hostapd_logger(nsb->hapd, client_get_local_bssid(client), HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, "sending "MACSTR" score %d associated %lu\n",
-			MAC2STR(client_get_mac(client)), client->score, associated_msecs);
+			MAC2STR(client_get_mac(client)), (int)client->score, (unsigned long)associated_msecs);
 
 		buf = wpabuf_alloc(MAX_FRAME_SIZE);
 		header_put(buf, nsb->frame_sn++);
@@ -691,8 +698,9 @@ static void do_flood_score(struct net_steering_client *client, Boolean on_associ
 
 static void flood_score(void *eloop_data, void *user_ctx)
 {
+	(void) user_ctx;
 	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
-	do_flood_score(client, FALSE);
+	do_flood_score(client);
 	start_flood_timer(client);
 }
 
@@ -1041,9 +1049,6 @@ Exit  {stop_timeout();}
 
 SM_STEP_EVENT(STEERING)
 {
-	/* Not sure if this is needed other than the macros in state_machine.h need it. */
-	int global = 0;
-
 	/* Define transitions for every event that has an action to perform */
 	/* Use no-ops for cases where only a state change is required */
 	/* Beware of states that have entry/exit actions defined */
@@ -1089,14 +1094,15 @@ SM_STEP_EVENT(STEERING)
 
 static void client_timeout(void *eloop_data, void *user_ctx)
 {
+	(void) user_ctx;
 	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
-	struct net_steering_bss* nsb = client->nsb;
 
 	SM_STEP_EVENT_RUN(STEERING, E_TIMEOUT, client);
 }
 
 static void probe_timeout(void *eloop_data, void *user_ctx)
 {
+	(void) user_ctx;
 	struct net_steering_client* client = (struct net_steering_client*) eloop_data;
 
 	hostapd_logger(client->nsb->hapd, NULL, HOSTAPD_MODULE_NET_STEERING,
@@ -1135,7 +1141,7 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 
 	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, MACSTR" sent score for "MACSTR" %d %lu local %d\n",
-			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, association_msecs, client->score);
+			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, (unsigned long) association_msecs, client->score);
 
 	/* we only care about scores when the client is not associated */
 	if (client_is_associated(client)) return;
@@ -1236,7 +1242,6 @@ static void receive(void *ctx, const u8 *src_addr, const u8 *buf, size_t len)
 	u8 target_bssid[ETH_ALEN];
 	u8 ap_channel = 0;
 	size_t num_read = 0;
-	struct net_steering_client* client = NULL;
 	const u8* buf_pos = buf;
 
 	num_read = parse_header(buf_pos, len, &magic, &version, &packet_len, &sn);
@@ -1412,7 +1417,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, i
 		if (!client) {
 			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 				HOSTAPD_LEVEL_WARNING, "Failed to create client "MACSTR" on bssid "MACSTR"\n",
-				MAC2STR(sta), MAC2STR(hapd->conf->bssid));
+				MAC2STR(sta->addr), MAC2STR(hapd->conf->bssid));
 
 			return;
 		}
@@ -1424,7 +1429,7 @@ void net_steering_association(struct hostapd_data *hapd, struct sta_info *sta, i
 	os_get_time(&client->association_time);
 	client->score = compute_score(rssi);
 	client_associate(client, sta);
-	do_flood_score(client, TRUE);
+	do_flood_score(client);
 	SM_STEP_EVENT_RUN(STEERING, E_ASSOCIATED, client);
 }
 

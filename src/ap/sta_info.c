@@ -34,6 +34,7 @@
 #include "wnm_ap.h"
 #include "ndisc_snoop.h"
 #include "sta_info.h"
+#include "net_steering.h"
 
 #ifdef HOSTAPD
 #include "ap/steering.h"	/* for write_connect_timestamp() proto */
