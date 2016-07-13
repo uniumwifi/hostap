@@ -325,3 +325,10 @@ CONFIG_WNM=y
 # http://wireless.kernel.org/en/users/Documentation/acs
 #
 #CONFIG_ACS=y
+
+# Network Steering support
+# The network steering system steers client STAs to the infrastructure AP with the
+# best RSSI. APs collaborate and can use several methods to direct client STAs to
+# transition to the best AP.
+#CONFIG_NET_STEERING=y
+

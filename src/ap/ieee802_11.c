@@ -44,14 +44,11 @@
 #include "ieee802_11.h"
 #include "dfs.h"
 #include "ap/steering.h"
+#include "net_steering.h"
+
 #ifdef CONFIG_CLIENT_TAXONOMY
 #include "taxonomy.h"
 #endif /* CONFIG_CLIENT_TAXONOMY */
-
-#ifdef CONFIG_NET_STEERING
-#include "net_steering.h"
-#endif /* CONFIG_NET_STEERING */
-
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
 {
@@ -1988,7 +1985,7 @@ static void handle_assoc(struct hostapd_data *hapd,
 #endif /* CONFIG_IEEE80211N */
 
 	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
-			HOSTAPD_LEVEL_INFO, "association OK (aid %d) on channel %d BSSID "MACSTR,
+			HOSTAPD_LEVEL_DEBUG, "association OK (aid %d) on channel %d BSSID "MACSTR,
 			sta->aid, hapd->iconf->channel, MAC2STR(mgmt->bssid));
 	/* Station will be marked associated, after it acknowledges AssocResp
 	 */

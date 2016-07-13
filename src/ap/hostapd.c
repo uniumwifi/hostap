@@ -42,6 +42,7 @@
 #include "x_snoop.h"
 #include "dhcp_snoop.h"
 #include "ndisc_snoop.h"
+#include "net_steering.h"
 
 
 static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
