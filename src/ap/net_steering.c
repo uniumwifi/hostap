@@ -223,9 +223,11 @@ static const char* event_to_str(int event)
 }
 
 
-static void client_set_remote_bssid(struct net_steering_client* client, const u8* bssid)
+static void client_update_remote(struct net_steering_client* client, const u8* bssid, struct os_time* local_t)
 {
 	os_memcpy(client->remote_bssid, bssid, ETH_ALEN);
+	client->remote_time.sec = local_t->sec;
+	client->remote_time.usec = local_t->usec;
 }
 
 static const u8* client_get_remote_bssid(struct net_steering_client* client)
@@ -348,17 +350,6 @@ static void client_associate(struct net_steering_client* client, struct sta_info
 
 	/* now that the client is associated, cancel probe timer */
 	client_stop_probe_timer(client);
-}
-
-static void client_disassociate(struct net_steering_client* client)
-{
-	client->sta = NULL;
-	os_memset(client->remote_bssid, 0, ETH_ALEN);
-	client->remote_time.sec = 0;
-	client->remote_time.usec = 0;
-
-	/* now that the client is disassociated, set probe timer */
-	client_start_probe_timer(client);
 }
 
 static Boolean client_is_associated(struct net_steering_client* client)
@@ -1122,6 +1113,22 @@ static void compare_scores(struct net_steering_client *client, u16 score)
 	}
 }
 
+static void client_disassociate(struct net_steering_client* client)
+{
+	/* Process event first, then cleanup data structures */
+	SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
+
+	client->sta = NULL;
+	os_memset(client->remote_bssid, 0, ETH_ALEN);
+	client->remote_time.sec = 0;
+	client->remote_time.usec = 0;
+	client->association_time.sec = 0;
+	client->association_time.usec = 0;
+
+	/* now that the client is disassociated, set probe timer */
+	client_start_probe_timer(client);
+}
+
 static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8* bssid,
 		u16 score, u32 association_msecs)
 {
@@ -1142,9 +1149,6 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 	hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 			HOSTAPD_LEVEL_DEBUG, MACSTR" sent score for "MACSTR" %d %lu local %d\n",
 			MAC2STR(bssid), MAC2STR(client_get_mac(client)), score, (unsigned long) association_msecs, client->score);
-
-	/* we only care about scores when the client is not associated */
-	if (client_is_associated(client)) return;
 
 	/* if we receive a score from a new AP for this client */
 	/* Establish if the AP has newer information than the current one */
@@ -1176,14 +1180,21 @@ static void receive_score(struct net_steering_bss* nsb, const u8* sta, const u8*
 		/* should we switch which AP is believed to be associated with the client? */
 		/* only if last remote time is before local time (giving us newer info) */
 		if (os_time_before(&client->remote_time, &local_t)) {
+
 			hostapd_logger(nsb->hapd, nsb->hapd->conf->bssid, HOSTAPD_MODULE_NET_STEERING,
 					HOSTAPD_LEVEL_INFO, MACSTR" is associated with client "MACSTR"\n",
 					MAC2STR(bssid), MAC2STR(client_get_mac(client)));
 
-			client->remote_time.sec = local_t.sec;
-			client->remote_time.usec = local_t.usec;
-			client_set_remote_bssid(client, bssid);
-			compare_scores(client, score);
+			/* if we are in associated state, client roamed and we need to change to disassociated */
+			if (client_is_associated(client)) {
+				client_disassociate(client);
+				client_update_remote(client, bssid, &local_t);
+			} else {
+
+				/* client has moved to a new AP */
+				client_update_remote(client, bssid, &local_t);
+				compare_scores(client, score);
+			}
 		}
 	} else {
 		/* if this score is from the same AP, then check it */
@@ -1374,8 +1385,6 @@ void net_steering_disassociation(struct hostapd_data *hapd, struct sta_info *sta
 						MAC2STR(sta->addr), MAC2STR(nsb->hapd->conf->bssid),
 						MAC2STR(client_get_close_bssid(client)));
 
-			SM_STEP_EVENT_RUN(STEERING, E_DISASSOCIATED, client);
-			// DO NOT clean up until after the disassociate event has been processed
 			client_disassociate(client);
 			break;
 		}
